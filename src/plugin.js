@@ -71,6 +71,8 @@ class PluginLightning extends PluginMiniAccounts {
   }
 
   async sendMoney (amount) {
+    debug(`sendMoney disabled for multi-plugin`)
+    return
     debug(`createOutgoingClaim: amountToPay: ${amount}`)
 
     if (new BigNumber(amount).lessThanOrEqualTo('0')) {
