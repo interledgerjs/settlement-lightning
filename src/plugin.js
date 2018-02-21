@@ -11,6 +11,7 @@ const shared = require('ilp-plugin-shared')
 const { InvalidFieldsError, NotAcceptedError } = shared.Errors
 const PluginMiniAccounts = require('ilp-plugin-mini-accounts')
 const IlpPacket = require ('ilp-packet')
+const BtpPacket = require ('btp-packet')
 const { Writer } = require('oer-utils')
 
 const lnrpcDescriptor = grpc.load(path.join(__dirname, 'rpc.proto'))
@@ -168,10 +169,10 @@ class PluginLightning extends PluginMiniAccounts {
     // quickfix for https://github.com/interledgerjs/ilp-plugin-lnd-asym-server/issues/2
     // copied from https://github.com/interledgerjs/ilp-plugin-xrp-asym-server/issues/18
     // TODO: don't do this, use connector only instead
-    if (ilp.data[0] === IlpPacket.Type.TYPE_ILP_PREPARE && IlpPacket.deserializeIlpPrepare(ilp.data).destination === 'peer.config') {
+    if (ilp[0] === IlpPacket.Type.TYPE_ILP_PREPARE && IlpPacket.deserializeIlpPrepare(ilp).destination === 'peer.config') {
       const writer = new Writer()
       debug(`responding to ildcp request`, from)
-      const response = this._prefix + from
+      const response = from
       writer.writeVarOctetString(Buffer.from(response))
 
       return [{
