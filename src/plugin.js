@@ -10,6 +10,9 @@ const decodePaymentRequest = require('./reqdecode').decodePaymentRequest
 const shared = require('ilp-plugin-shared')
 const { InvalidFieldsError, NotAcceptedError } = shared.Errors
 const PluginMiniAccounts = require('ilp-plugin-mini-accounts')
+const IlpPacket = require ('ilp-packet')
+const BtpPacket = require ('btp-packet')
+const { Writer } = require('oer-utils')
 
 const lnrpcDescriptor = grpc.load(path.join(__dirname, 'rpc.proto'))
 const lnrpc = lnrpcDescriptor.lnrpc
@@ -162,6 +165,25 @@ class PluginLightning extends PluginMiniAccounts {
 
   async _handleData (from, { requestId, data }) {
     const { ilp, protocolMap } = this.protocolDataToIlpAndCustom(data)
+
+    // quickfix for https://github.com/interledgerjs/ilp-plugin-lnd-asym-server/issues/2
+    // copied from https://github.com/interledgerjs/ilp-plugin-xrp-asym-server/issues/18
+    // TODO: don't do this, use connector only instead
+    if (ilp[0] === IlpPacket.Type.TYPE_ILP_PREPARE && IlpPacket.deserializeIlpPrepare(ilp).destination === 'peer.config') {
+      const writer = new Writer()
+      debug(`responding to ildcp request`, from)
+      const response = from
+      writer.writeVarOctetString(Buffer.from(response))
+
+      return [{
+        protocolName: 'ilp',
+        contentType: BtpPacket.MIME_APPLICATION_OCTET_STRING,
+        data: IlpPacket.serializeIlpFulfill({
+          fulfillment: Buffer.alloc(32),
+          data: writer.getBuffer()
+        })
+      }]
+    }
 
     if (protocolMap[GET_INVOICE_RPC_METHOD]) {
       const amount = JSON.parse(protocolMap[GET_INVOICE_RPC_METHOD]
