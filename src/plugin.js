@@ -18,6 +18,8 @@ const lnrpcDescriptor = grpc.load(path.join(__dirname, 'rpc.proto'))
 const lnrpc = lnrpcDescriptor.lnrpc
 
 const GET_INVOICE_RPC_METHOD = '_get_lightning_invoice'
+const ASSET_CODE = 'BTC'
+const ASSET_SCALE = 8
 
 class PluginLightning extends PluginMiniAccounts {
   constructor (opts) {
@@ -174,6 +176,8 @@ class PluginLightning extends PluginMiniAccounts {
       debug(`responding to ildcp request`, from)
       const response = from
       writer.writeVarOctetString(Buffer.from(response))
+      writer.writeUInt8(ASSET_SCALE)
+      writer.writeVarOctetString(Buffer.from(ASSET_CODE, 'utf8'))
 
       return [{
         protocolName: 'ilp',
