@@ -46,7 +46,7 @@ const server = new PluginLightning({
   _store: new ObjStore()
 })
 
-function doPayment() {
+function doPayment () {
   const fulfillment = crypto.randomBytes(32)
   const condition = sha256(fulfillment)
 

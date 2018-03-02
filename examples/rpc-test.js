@@ -68,7 +68,6 @@ const condition = shared.Util.base64url(hash(fulfillment))
 console.log('condition: ', condition, 'fulfillment:', fulfillment)
 
 async function runTest () {
-
   await sender.connect()
   console.log('sender connected')
   await receiver.connect()
@@ -153,7 +152,6 @@ async function runTest () {
     id: uuid(),
     expiresAt: moment().add(10, 'seconds').toISOString()
   }))
-
 
   const rejectedPromise = new Promise((resolve) => {
     sender.once('outgoing_reject', (transfer, rejectionMessage) => {
