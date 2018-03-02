@@ -5,13 +5,11 @@ const debug = require('debug')('ilp-plugin-lightning')
 const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
-const BigNumber = require('bignumber.js')
-const decodePaymentRequest = require('./reqdecode').decodePaymentRequest
 const shared = require('ilp-plugin-shared')
-const { InvalidFieldsError, NotAcceptedError } = shared.Errors
+const { InvalidFieldsError } = shared.Errors
 const PluginMiniAccounts = require('ilp-plugin-mini-accounts')
-const IlpPacket = require ('ilp-packet')
-const BtpPacket = require ('btp-packet')
+const IlpPacket = require('ilp-packet')
+const BtpPacket = require('btp-packet')
 const { Writer } = require('oer-utils')
 
 const lnrpcDescriptor = grpc.load(path.join(__dirname, 'rpc.proto'))
@@ -77,52 +75,6 @@ class PluginLightning extends PluginMiniAccounts {
 
   async sendMoney (amount) {
     debug(`sendMoney disabled for multi-plugin`)
-    return
-    debug(`createOutgoingClaim: amountToPay: ${amount}`)
-
-    if (new BigNumber(amount).lessThanOrEqualTo('0')) {
-      return
-    }
-
-    let paymentRequest
-    try {
-      const response = await this._call(null, {
-        type: BtpPacket.TYPE_MESSAGE,
-        requestId: await _requestId(),
-        data: { protocolData: [{
-          protocolName: GET_INVOICE_RPC_METHOD,
-          contentType: BtpPacket.MIME_APPLICATION_JSON,
-          data: Buffer.from(JSON.stringify(amount))
-        }] }
-      })
-
-      paymentRequest = JSON.parse(response
-        .protocolData
-        .filter(p => p.protocolName === GET_INVOICE_RPC_METHOD)[0]
-        .data
-        .toString())
-        .paymentRequest
-
-      debug('got lightning payment request from peer:', paymentRequest)
-    } catch (err) {
-      debug('error getting lightning invoice from peer', err)
-      throw err
-    }
-
-    const paymentPreimage = await payLightningInvoice(this.lightning, paymentRequest, amountToPay)
-
-    await this._call(null, {
-      type: BtpPacket.TYPE_TRANSFER,
-      requestId: await _requestId(),
-      data: {
-        amount,
-        protocolData: [{
-          protocolName: 'payment_preimage',
-          contentType: BtpPacket.MIME_APPLICATION_JSON,
-          data: Buffer.from(JSON.stringify({ paymentPreimage }))
-        }]
-      }
-    })
   }
 
   async _handleMoney (from, { requestId, data }) {
@@ -217,43 +169,6 @@ class PluginLightning extends PluginMiniAccounts {
   }
 }
 
-async function payLightningInvoice (lightning, paymentRequest, amountToPay) {
-  // TODO can we check how much it's going to cost before sending? what if the fees are really high?
-  debug('sending lightning payment for payment request: ' + paymentRequest)
-
-  // Check that the invoice amount matches the transfer amount
-  const decodedReq = decodePaymentRequest(paymentRequest)
-  const amountDiff = new BigNumber(decodedReq.amount).sub(amountToPay).absoluteValue()
-  if (amountDiff.greaterThan(new BigNumber(amountToPay).times(0.05))) {
-    debug('amounts in payment request and in transfer are significantly different:', decodedReq, amountToPay)
-    throw new Error(`amounts in payment request and in transfer are significantly different. transfer amount: ${amountToPay}, payment request amount: ${decodedReq.amount}`)
-  }
-
-  let result
-  try {
-    result = await new Promise((resolve, reject) => {
-      lightning.sendPaymentSync({
-        payment_request: paymentRequest
-      }, (err, res) => {
-        if (err) return reject(err)
-        resolve(res)
-      })
-    })
-  } catch (err) {
-    debug('error sending lightning payment for payment request:', paymentRequest, err)
-    throw err
-  }
-
-  if (result.payment_route && result.payment_preimage) {
-    const preimage = result.payment_preimage.toString('hex')
-    debug('sent lightning payment for payment request: ' + paymentRequest + ', got payment preimage:', preimage)
-    return preimage
-  } else {
-    debug('error sending lightning payment:', result)
-    throw new Error('error sending payment:' + result.payment_error)
-  }
-}
-
 async function createLightningInvoice (lightning, amount) {
   // TODO when should the lightning invoice expire?
   const invoice = await new Promise((resolve, reject) => {
@@ -265,24 +180,6 @@ async function createLightningInvoice (lightning, amount) {
     })
   })
   return invoice
-}
-
-function hash (preimage) {
-  const h = crypto.createHash('sha256')
-  h.update(Buffer.from(preimage, 'hex'))
-  return h.digest()
-}
-
-function hashToUuid (hash) {
-  const hex = Buffer.from(hash, 'hex').toString('hex')
-  let chars = hex.substring(0, 36).split('')
-  chars[8] = '-'
-  chars[13] = '-'
-  chars[14] = '4'
-  chars[18] = '-'
-  chars[19] = '8'
-  chars[23] = '-'
-  return chars.join('')
 }
 
 PluginLightning.version = 2

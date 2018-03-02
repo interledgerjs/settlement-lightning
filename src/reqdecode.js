@@ -25,7 +25,7 @@ function decodePaymentRequest (req) {
     return { amount: parseInt(match[1]) * 100 }
   }
 
-  if (match[2] ===  'n') { // nano-Bitcoin to Satoshi
+  if (match[2] === 'n') { // nano-Bitcoin to Satoshi
     return { amount: parseInt(match[1]) / 10 }
   }
 

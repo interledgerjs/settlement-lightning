@@ -1,3 +1,4 @@
+/* globals describe, it */
 'use strict'
 
 const decodePaymentRequest = require('../src/reqdecode').decodePaymentRequest
