@@ -1,6 +1,6 @@
 {
   "name": "ilp-plugin-lnd-asym-server",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Interledger.js BTP Server Plugin for the Lightning Network",
   "main": "src/plugin.js",
   "scripts": {
