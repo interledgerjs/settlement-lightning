@@ -1,4 +1,4 @@
-# ilp-plugin-lightning
+# ilp-plugin-lnd-asym-server
 > Interledger.js Ledger Plugin for the Lightning Network
 
 This plugin enables [Interledger](https://interledger.org) payments through the Bitcoin and Litecoin [Lightning Networks](https://lightning.network).
@@ -8,13 +8,13 @@ See the [ILP Lightning Demo](https://github.com/interledgerjs/ilp-lightning-demo
 ## Installation
 
 ```sh
-npm install --save ilp-plugin-lightning
+npm install ilp-plugin-lnd-asym-server
 ```
 
 ## Usage
 
 This plugin can be used with the [`ilp`](https://github.com/interledgerjs/ilp) client module or the [`ilp-connector`](https://github.com/interledgerjs/ilp-connector).
-See the [Ledger Plugin Interface](https://github.com/interledger/rfcs/blob/master/0004-ledger-plugin-interface/0004-ledger-plugin-interface.md) for documentation on available methods.
+See the [Ledger Plugin Interface v2](https://interledger.org/rfcs/0024-ledger-plugin-interface-2/) for documentation on available methods.
 
 A minimal way to test your setup:
 * Set up a local Lightning cluster as explained in http://dev.lightning.community/tutorial/01-lncli/ - but run btcd with `--testnet` instead of `--simnet`
