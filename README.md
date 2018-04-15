@@ -30,6 +30,11 @@ lncli --no-macaroons newaddress np2wkh
 lncli --no-macaroons walletbalance witness-only=true
 ```
 
+Now you can run a server on localhost, using:
+```sh
+DEBUG=* node scripts/server.js
+```
+
 ## How It Works
 
 This plugin can be used by two Interledger nodes (sender to connector, connector to connector, and connector to receiver) to send payments through an instance of the Lightning Network. It uses the [Bilateral Transfer Protocol](https://github.com/interledger/rfcs/blob/master/0023-bilateral-transfer-protocol/0023-bilateral-transfer-protocol.md), implemented by the [mini-accounts framework](https://github.com/interledgerjs/ilp-plugin-mini-account), to send Interledger payment and quote details that cannot currently be communicated through `lnd` itself. Because of the need for an additional messaging layer, this plugin implementation only works bilaterally at present.
