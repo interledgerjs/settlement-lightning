@@ -39,6 +39,7 @@ class PluginLightning extends PluginMiniAccounts {
     }
 
     super(opts)
+    process.env.GRPC_SSL_CIPHER_SUITES = 'HIGH+ECDSA'
 
     this.maxUnsecured = opts.maxUnsecured || opts.maxInFlight
     this.authToken = opts.authToken
@@ -105,7 +106,7 @@ class PluginLightning extends PluginMiniAccounts {
 
     const condition = crypto
       .createHash('sha256')
-      .update(paymentPreimage)
+      .update(paymentPreimage, 'hex')
       .digest()
       .toString('hex')
 
@@ -135,7 +136,7 @@ class PluginLightning extends PluginMiniAccounts {
     // quickfix for https://github.com/interledgerjs/ilp-plugin-lnd-asym-server/issues/2
     // copied from https://github.com/interledgerjs/ilp-plugin-xrp-asym-server/issues/18
     // TODO: don't do this, use connector only instead
-    if (ilp[0] === IlpPacket.Type.TYPE_ILP_PREPARE && IlpPacket.deserializeIlpPrepare(ilp).destination === 'peer.config') {
+    if (ilp && ilp[0] === IlpPacket.Type.TYPE_ILP_PREPARE && IlpPacket.deserializeIlpPrepare(ilp).destination === 'peer.config') {
       const writer = new Writer()
       debug(`responding to ildcp request`, from)
       const response = from
@@ -154,15 +155,13 @@ class PluginLightning extends PluginMiniAccounts {
     }
 
     if (protocolMap[GET_INVOICE_RPC_METHOD]) {
-      const amount = JSON.parse(protocolMap[GET_INVOICE_RPC_METHOD]
-        .data
-        .toString())
+      const amount = protocolMap[GET_INVOICE_RPC_METHOD]
 
       debug('creating lightning invoice for amount', amount)
       const invoice = await createLightningInvoice(this.lightning, amount)
-      this.invoices.set(invoice.r_hash, amount)
+      this.invoices.set(invoice.r_hash.toString('hex'), amount)
 
-      debug('created lightning invoice:', invoice.payment_request, 'for amount:', amount)
+      debug('created lightning invoice:', invoice.payment_request, 'for amount:', amount, 'r_hash:', invoice.r_hash.toString('hex'))
       return [{
         protocolName: GET_INVOICE_RPC_METHOD,
         contentType: BtpPacket.MIME_APPLICATION_JSON,
