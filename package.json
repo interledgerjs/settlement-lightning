@@ -20,7 +20,7 @@
     "bignumber.js": "^4.0.2",
     "btp-packet": "^1.2.0",
     "debug": "^2.6.8",
-    "grpc": "^1.3.7",
+    "grpc": "^1.11.3",
     "ilp-plugin-mini-accounts": "^3.4.0",
     "ilp-plugin-shared": "https://github.com/interledgerjs/ilp-plugin-shared.git",
     "int64-buffer": "^0.1.9",
