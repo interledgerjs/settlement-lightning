@@ -1,16 +1,24 @@
 'use strict'
 
 const grpc = require('grpc')
-const debug = require('debug')('ilp-plugin-lightning')
+const debug = require('debug')('ilp-plugin-lnd-asym-server')
 const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
+const os = require('os')
 const shared = require('ilp-plugin-shared')
 const { InvalidFieldsError } = shared.Errors
 const PluginMiniAccounts = require('ilp-plugin-mini-accounts')
 const IlpPacket = require('ilp-packet')
 const BtpPacket = require('btp-packet')
 const { Writer } = require('oer-utils')
+
+// Due to updated ECDSA generated tls.cert we need to let gprc know that
+// we need to use that cipher suite otherwise there will be a handhsake
+// error when we communicate with the lnd rpc server.
+process.env.GRPC_SSL_CIPHER_SUITES = 'HIGH+ECDSA'
+const MAC_TLS_CERT_PATH = path.join(os.homedir(), 'Library/Application Support/Lnd/tls.cert')
+const LINUX_TLS_CERT_PATH = path.join(os.homedir(), '.lnd/tls.cert')
 
 const lnrpcDescriptor = grpc.load(path.join(__dirname, 'rpc.proto'))
 const lnrpc = lnrpcDescriptor.lnrpc
@@ -37,7 +45,7 @@ class PluginLightning extends PluginMiniAccounts {
     this.authToken = opts.authToken
     this.lndUri = opts.lndUri
 
-    this.lndTlsCertPath = opts.lndTlsCertPath
+    this.lndTlsCertPath = opts.lndTlsCertPath || (process.platform === 'darwin' ? MAC_TLS_CERT_PATH : LINUX_TLS_CERT_PATH)
     this.invoices = new Map()
   }
 
