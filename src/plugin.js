@@ -3,6 +3,7 @@
 const grpc = require('grpc')
 const debug = require('debug')('ilp-plugin-lnd-asym-server')
 const crypto = require('crypto')
+const util = require('util')
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
@@ -19,6 +20,8 @@ const { Writer } = require('oer-utils')
 process.env.GRPC_SSL_CIPHER_SUITES = 'HIGH+ECDSA'
 const MAC_TLS_CERT_PATH = path.join(os.homedir(), 'Library/Application Support/Lnd/tls.cert')
 const LINUX_TLS_CERT_PATH = path.join(os.homedir(), '.lnd/tls.cert')
+const MAC_MACAROON_PATH = path.join(os.homedir(), 'Library/Application Support/Lnd/admin.macaroon')
+const LINUX_MACAROON_PATH = path.join(os.homedir(), '.lnd/admin.macaroon')
 
 const lnrpcDescriptor = grpc.load(path.join(__dirname, 'rpc.proto'))
 const lnrpc = lnrpcDescriptor.lnrpc
@@ -42,26 +45,31 @@ class PluginLightning extends PluginMiniAccounts {
     this.lndUri = opts.lndUri
 
     this.lndTlsCertPath = opts.lndTlsCertPath || (process.platform === 'darwin' ? MAC_TLS_CERT_PATH : LINUX_TLS_CERT_PATH)
+    this.macaroonPath = opts.macaroonPath || (process.platform === 'darwin' ? MAC_MACAROON_PATH : LINUX_MACAROON_PATH)
     this.invoices = new Map()
   }
 
   async _connect () {
-    const lndTlsCertPath = this.lndTlsCertPath
     try {
-      const lndCert = await new Promise((resolve, reject) => {
-        fs.readFile(lndTlsCertPath, (err, cert) => {
-          if (err) throw err
-          resolve(cert)
+      const lndCert = await util.promisify(fs.readFile)(this.lndTlsCertPath)
+      let credentials = grpc.credentials.createSsl(lndCert)
+
+      // Use macaroons also, if there is one in the lnd directory
+      // See https://github.com/lightningnetwork/lnd/blob/master/docs/grpc/javascript.md#using-macaroons
+      const macaroonExists = await util.promisify(fs.exists)(this.macaroonPath)
+      if (macaroonExists) {
+        const macaroon = await util.promisify(fs.readFile)(this.macaroonPath)
+        const metadata = new grpc.Metadata()
+        metadata.add('macaroon', macaroon.toString('hex'))
+        const macaroonCreds = grpc.credentials.createFromMetadataGenerator((_args, callback) => {
+          callback(null, metadata);
         })
-      })
-      this.lightning = new lnrpc.Lightning(this.lndUri, grpc.credentials.createSsl(lndCert))
+        credentials = grpc.credentials.combineChannelCredentials(credentials, macaroonCreds)
+      }
+
+      this.lightning = new lnrpc.Lightning(this.lndUri, credentials)
       debug('connecting to lnd:', this.lndUri)
-      const lightningInfo = await new Promise((resolve, reject) => {
-        this.lightning.getInfo({}, (err, info) => {
-          if (err) return reject(err)
-          resolve(info)
-        })
-      })
+      const lightningInfo = await util.promisify(this.lightning.getInfo.bind(this.lightning))({})
       debug('got lnd info:', lightningInfo)
     } catch (err) {
       debug('error connecting to lnd', err)
