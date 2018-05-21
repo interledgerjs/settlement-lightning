@@ -1,9 +1,8 @@
 const ObjStore = require('ilp-plugin-payment-channel-framework/test/helpers/objStore')
-const PluginLightning = require('..')
-
+const ServerPluginLightning = require('..')
+const ClientPluginLightning = require('ilp-plugin-lnd-asym-client')
 const crypto = require('crypto')
 const IlpPacket = require('ilp-packet')
-const uuid = require('uuid/v4')
 
 function base64url (buf) {
   return buf.toString('base64')
@@ -15,73 +14,59 @@ function sha256 (preimage) {
 }
 
 // Alice
-const client = new PluginLightning({
+const client = new ClientPluginLightning({
   server: 'btp+ws://:pass@localhost:9000',
 
-  maxBalance: '1000000', // max allowed balance in Satoshis
-  maxUnsecured: '100000', // max that can be sent over Interledger before settlement over Lightning is required
+  maxBalance: '1000000',
+  maxUnsecured: '100000',
 
-  lndTlsCertPath: process.env.LND_TLS_CERT_PATH,
-  lndUri: 'localhost:10001', // lnd rpc URI for Alice
+  lndUri: 'localhost:10001',
   peerPublicKey: process.env.BOB_PUBKEY,
+  macaroonPath: process.env.ALICE_MACAROON_PATH,
+  lndTlsCertPath: process.env.LND_TLS_CERT_PATH,
 
   _store: new ObjStore()
 })
 
 // Bob
-const server = new PluginLightning({
-  listener: { port: 9000 },
+const server = new ServerPluginLightning({
   incomingSecret: 'pass',
+  port: 9000,
 
-  prefix: 'g.bitcoin.lightning.',
-  info: {},
+  maxBalance: '1000000',
+  maxUnsecured: '100000',
 
-  maxBalance: '1000000', // max allowed balance in Satoshis
-  maxUnsecured: '100000', // max that can be sent over Interledger before settlement over Lightning is required
-
-  lndTlsCertPath: process.env.LND_TLS_CERT_PATH,
-  lndUri: 'localhost:10002', // lnd rpc URI for Bob
+  lndUri: 'localhost:10002',
   peerPublicKey: process.env.ALICE_PUBKEY,
+  macaroonPath: process.env.BOB_MACAROON_PATH,
+  lndTlsCertPath: process.env.LND_TLS_CERT_PATH,
 
-  _store: new ObjStore()
+  _store: new ObjStore(),
+
+  debugHostIldcpInfo: {
+    clientAddress: 'test.server-bob'
+  },
 })
 
-function doPayment () {
-  const fulfillment = crypto.randomBytes(32)
-  const condition = sha256(fulfillment)
+async function run () {
 
-  return new Promise((resolve, reject) => {
-    server.on('incoming_prepare', transfer => {
-      console.log('Transfer prepared server-side. Condition: ' + transfer.executionCondition)
-      server.fulfillCondition(transfer.id, base64url(fulfillment))
-    })
-    client.on('outgoing_fulfill', function (transferId, fulfillmentBase64) {
-      console.log('Transfer executed. Fulfillment: ' + fulfillmentBase64)
-      resolve()
-    })
-
-    client.sendTransfer({
-      ledger: client.getInfo().prefix,
-      from: client.getAccount(),
-      to: server.getAccount(),
-      amount: '12345',
-      executionCondition: base64url(condition),
-      id: uuid(),
-      ilp: base64url(IlpPacket.serializeIlpPayment({
-        amount: '12345',
-        account: server.getAccount()
-      })),
-      expiresAt: new Date(new Date().getTime() + 1000000).toISOString()
-    }).then(function () {
-      console.log('Transfer prepared client-side, waiting for fulfillment...')
-    }, function (err) {
-      console.error(err.message)
-    })
+  server.registerMoneyHandler((amount) => {
+    console.log('server got money:', amount)
   })
+  server.registerDataHandler((data) => {
+    console.log('server got data:', data.toString('utf8'))
+  })
+
+  console.log('sending money')
+  await client.sendMoney('100')
+  console.log('sent money')
+
+  console.log('sending data')
+  await client.sendData(Buffer.from('hello world', 'utf8'))
+  console.log('sent data')
 }
 
 Promise.all([ client.connect(), server.connect() ])
-  .then(() => doPayment())
-  .then(() => new Promise(resolve => setTimeout(resolve, 3000)))
+  .then(() => run())
   .then(() => client.disconnect())
   .then(() => server.disconnect())
