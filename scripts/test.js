@@ -3,7 +3,6 @@ const ServerPluginLightning = require('..')
 const ClientPluginLightning = require('ilp-plugin-lnd-asym-client')
 const crypto = require('crypto')
 const IlpPacket = require('ilp-packet')
-const uuid = require('uuid/v4')
 
 function base64url (buf) {
   return buf.toString('base64')
@@ -18,14 +17,14 @@ function sha256 (preimage) {
 const client = new ClientPluginLightning({
   server: 'btp+ws://:pass@localhost:9000',
 
-  maxBalance: '1000000', 
-  maxUnsecured: '100000', 
-  
+  maxBalance: '1000000',
+  maxUnsecured: '100000',
+
   lndUri: 'localhost:10001',
   peerPublicKey: process.env.BOB_PUBKEY,
   macaroonPath: process.env.ALICE_MACAROON_PATH,
   lndTlsCertPath: process.env.LND_TLS_CERT_PATH,
-  
+
   _store: new ObjStore()
 })
 
@@ -34,10 +33,10 @@ const server = new ServerPluginLightning({
   incomingSecret: 'pass',
   port: 9000,
 
-  maxBalance: '1000000', 
+  maxBalance: '1000000',
   maxUnsecured: '100000',
 
-  lndUri: 'localhost:10002', 
+  lndUri: 'localhost:10002',
   peerPublicKey: process.env.ALICE_PUBKEY,
   macaroonPath: process.env.BOB_MACAROON_PATH,
   lndTlsCertPath: process.env.LND_TLS_CERT_PATH,
