@@ -44,13 +44,13 @@ class BtcPlugin extends EventEmitter2 implements LndPluginOpts {
 		super()
 		this._balance = { 
 			minimum: new BigNumber((opts._balance && opts._balance.minimum) || Infinity)
-				.dp(0, BigNumber.ROUND_FLOOR),
+			.dp(0, BigNumber.ROUND_FLOOR),
 			maximum: new BigNumber((opts._balance && opts._balance.maximum) || Infinity)
-				.dp(0, BigNumber.ROUND_FLOOR),
+			.dp(0, BigNumber.ROUND_FLOOR),
 			settleTo: new BigNumber((opts._balance && opts._balance.settleTo) || Infinity)
-				.dp(0, BigNumber.ROUND_FLOOR),
+			.dp(0, BigNumber.ROUND_FLOOR),
 			settleThreshold: new BigNumber((opts._balance && opts._balance.settleThreshold) || Infinity)
-				.dp(0, BigNumber.ROUND_FLOOR)
+			.dp(0, BigNumber.ROUND_FLOOR)
 		}
 		this._role = opts._role || 'client'
 		this._log = opts._log || createLogger(`ilp-plugin-lnd-${this._role}`)
@@ -161,7 +161,7 @@ class BtcClientPlugin extends BtpPlugin implements PluginInstance {
 
 class BtcServerPlugin extends MiniAccountsPlugin implements PluginInstance {
 	private _accounts: Map<string, BtcAccount>
-	private _master: BtcPlugin
+		private _master: BtcPlugin
 	constructor (opts: any) {
 		super(opts)
 
