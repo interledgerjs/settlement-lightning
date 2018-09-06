@@ -175,22 +175,4 @@ export default class BtcAccount {
 
 	async disconnect () { 
 	}
-
-	/****************** LND Helpers ***************/
-	async _getChannel (pub_key: string): Channel {
-		const channels: Channel[] = this._lightning.listChannels()
-		const filteredChannels: Channel[] = channels.channels.filter(c => c.remote_pubkey == pub_key)
-		
-		// Ensure only one matching channel
-		switch (filteredChannels.length) {
-			// FIXME currently just returns Channel object, likely should just be chanID
-			case 1:
-				return filteredChannels[0]
-			case 0:
-				throw new Error(`Channel connecting account ${this.account.accountName} with public key ` + 
-					`${this.master.address} does not exist with requested public key: ${pub_key}`)
-			default:
-				throw new Error(`Unexpected number of channels with public key: ${pub_key} exist for account ${this.account.accountName}`)
-		}
-	}
 }

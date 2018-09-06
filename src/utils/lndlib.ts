@@ -41,18 +41,18 @@ export default class LndLib {
 	}
 
 	// TODO what will this return type be?
-	createChannel(peerPubKey: string, fundingAmt: number, pushAmt: number): Promise<any> {
+	createChannel(peerPubKey: string, fundingAmt: number, pushAmt: number): Promise<void> {
 		// if is peer already:
 		const request: Object = {
 			node_pubkey_string: peerPubKey,
 			local_funding_amt: fundingAmt,
 			push_sat: pushAmt
 		}
-		const call = lightning.openChannel(request)
-		call.on('data', function(response) {
+		const call = this.lightning.openChannel(request)
+		call.on('data', function(response: string) {
 			console.log(response)
 		})
-		call.on('status', function(status) {
+		call.on('status', function(status: string) {
 			console.log(status)
 		})
 		call.on('end', function() {
@@ -60,9 +60,10 @@ export default class LndLib {
 		})
 	}
 
-	async isPeer(peerIdentityPubKey: string): boolean {
+	async isPeer(peerIdentityPubKey: string): <boolean> {
 		// checks if at least one peer w/ peer identity pubkey existsexists
-		return (await listPeers).some(p => p.pub_key === peerIdentityPubKey)
+		const peers: any[] = await listPeers()
+		return peers.some(p => p.pub_key === peerIdentityPubKey)
 	}
 
 	async connectPeer(peerAddress: string, peerHost: string): Promise<string> {
@@ -75,7 +76,22 @@ export default class LndLib {
 		return await this.lightning.listPeers()
 	}
 
+  async _getChannel (pub_key: string): Channel {
+    const channels: Channel[] = this._lightning.listChannels()
+    const filteredChannels: Channel[] = channels.channels.filter(c => c.remote_pubkey == pub_key)
 
+    // Ensure only one matching channel
+    switch (filteredChannels.length) {
+      // FIXME currently just returns Channel object, likely should just be chanID
+      case 1:
+        return filteredChannels[0]
+      case 0:
+        throw new Error(`Channel connecting account ${this.account.accountName} with public key ` +
+          `${this.master.address} does not exist with requested public key: ${pub_key}`)
+      default:
+        throw new Error(`Unexpected number of channels with public key: ${pub_key} exist for account ${this.account.accountName}`)
+    }
+  }
 
 	/******************* Lnd initialization helpers ****************/
 
@@ -138,6 +154,5 @@ export default class LndLib {
 		const packageDefinition = await protoLoader.load(this.protoPath, opts)
 		const lnrpcDescriptor = grpc.loadPackageDefinition(packageDefinition)
 		 */
-
 }
 
