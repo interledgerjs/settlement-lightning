@@ -59,7 +59,7 @@ class BtcPlugin extends EventEmitter2 implements LndPluginOpts {
 
 		//this._store = new StoreWrapper(opts._store)
 	}
-		/*
+
 	async connect () {
 		this._channels = new Map(await this._store.loadObject('channels'))
 		return this._plugin.connect()
@@ -95,7 +95,7 @@ class BtcPlugin extends EventEmitter2 implements LndPluginOpts {
 
 	deregisterMoneyHandler() {
 		return this._plugin.deregisterMoneyHandler()
-	} */
+	}
 }
 
 class BtcClientPlugin extends BtpPlugin implements PluginInstance {
