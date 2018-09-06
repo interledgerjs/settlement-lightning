@@ -2,10 +2,13 @@ import BigNumber from 'bignumber.js'
 import BtcPlugin = require ('.')
 const BtpPacket = require('btp-packet')
 import * as IlpPacket from 'ilp-packet'
+import { DataHandler, MoneyHandler } from './utils/types'
 import { promisify } from 'util'
 import { randomBytes } from 'crypto'
-import {BtpPacket, BtpPacketData} from 'ilp-plugin-btp'
-import { validateBtcAddress } from './utils/address_validator'
+import { BtpPacket, BtpPacketData, BtpSubProtocol } from 'ilp-plugin-btp'
+import { validate as validateAddress } from 'bitcoin-address'
+import { Channel } from './utils/lightning-types'
+
 // Used to denominate which assetScale we are using
 export enum Unit { BTC = 9, Satoshi = 0 }
 
@@ -82,11 +85,11 @@ export default class BtcAccount {
 	}
 	
 	async connect () {
-		const savedAccount = await this.master._store.loadObject(`account:${accountName}`)
+		const savedAccount = await this.master._store.loadObject(`account:${this.account.accountName}`)
 
 		this.account = new Proxy({
 			...this.account,
-			...sabedAccount
+			...savedAccount
 		}, {
 			set: (account, key, val) => {
 				this.master._store.set(this.account.accountName, JSON.stringify({
@@ -98,7 +101,7 @@ export default class BtcAccount {
 		})
 	}
 
-	async shareBtcAddress (): Promise<void> {
+	async shareAddress (): Promise<void> {
 		const response = await this.sendMessage({
 			type: BtpPacket.TYPE_MESSAGE,
 			requestId: await requestId(),
@@ -114,7 +117,7 @@ export default class BtcAccount {
 		})
 	}
 
-	linkBtcAddress (info: BtpSubProtocol): void {
+	linkAddress (info: BtpSubProtocol): void {
 		const { address } = JSON.parse(info.data.toString()) 
 
 		if (this.account.address) {
@@ -129,7 +132,7 @@ export default class BtcAccount {
 				`${this.account.accountName}: ${this.account.address} is already linked`)
 		}
 
-		if (validateBtcAddress(address)) {
+		if (validateAddress(address)) {
 			this.account.address = address
 			this.master._log.trace(`Successfully linked address ${address} to account ${this.account.accountName}`)
 		} else {
@@ -137,23 +140,57 @@ export default class BtcAccount {
 		}
 	}
 
-		/*	
+	async fundOutgoingChannel (settlementBudget: BigNumber): Promise<BigNumber> {
+		let requiresNewChannel = false
+		let requiresDeposit = false
+		let channel: Channel | null
+
+		// Check if channel already exists
+		if (typeof(this.account.channel) === 'string') {
+			channel = await this._getChannel()
+			// if channel does not exist, just create a new one
+			if (!channel) return lndlib.createChannel()
+			if (settlementBudget.gt(channel.local_balance)) {
+				// TODO fund existing channel functionality
+			}
+		}
+	}
+
 	async attemptSettle () {
 	}
 
-	async handleData (message: BtpPacket, dataHandler?: DataHandler): Promise<BtpSubProtocol> {
+	async handleData (message: BtpPacket, dataHandler?: DataHandler): Promise<BtpSubProtocol[]> {
+		return []
 	}
 
-	async handleMoney (message: BtpPacket, moneyHandler?: MoneyHandler): Promise<BtpSubProtocol> {
+	async handleMoney (message: BtpPacket, moneyHandler?: MoneyHandler): Promise<BtpSubProtocol[]> {
+		return []
 	}
 
-	async beforeForward (preparePacket: IlpPacket.IlpPacket): void { 
+	beforeForward (preparePacket: IlpPacket.IlpPacket): void { 
 	}
 
-	async afterForwardResponse (preparePacket: IlpPAcket.IlpPacket, responsePacket: IlpPacket.IlpPacket): Promise<void> {
+	async afterForwardResponse (preparePacket: IlpPacket.IlpPacket, responsePacket: IlpPacket.IlpPacket): Promise<void> {
 	}
 
 	async disconnect () { 
 	}
-		 */
+
+	/****************** LND Helpers ***************/
+	async _getChannel (pub_key: string): Channel {
+		const channels: Channel[] = this._lightning.listChannels()
+		const filteredChannels: Channel[] = channels.channels.filter(c => c.remote_pubkey == pub_key)
+		
+		// Ensure only one matching channel
+		switch (filteredChannels.length) {
+			// FIXME currently just returns Channel object, likely should just be chanID
+			case 1:
+				return filteredChannels[0]
+			case 0:
+				throw new Error(`Channel connecting account ${this.account.accountName} with public key ` + 
+					`${this.master.address} does not exist with requested public key: ${pub_key}`)
+			default:
+				throw new Error(`Unexpected number of channels with public key: ${pub_key} exist for account ${this.account.accountName}`)
+		}
+	}
 }
