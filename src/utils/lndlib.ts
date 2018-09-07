@@ -14,26 +14,13 @@ export default class LndLib {
    * there is def. a cleaner way to do this than just having 
    * an empty constructor then having a .connect() step */
   private lightning: any
-  constructor() {}
-
-  async connect() {
-    // Default lnd host and port
-    const lndHost: string = 'localhost:10006'
-    // get ssl certificate
-    const lndCert = await this._getCert()
-    // macaroon credentials
-    const macaroonCreds = await this._getMacaroonCreds()
-    // combine credentials for lnrpc
-    const sslCreds = grpc.credentials.createSsl(lndCert)
-    const combinedCredentials = grpc.credentials.combineChannelCredentials(sslCreds, macaroonCreds)
-		// create lightning instance
-		// TODO make this path so that typescript compiles it at all times
-		const protoPath: string = './utils/rpc.proto'
-		const lnrpc = await this._loadDescriptor(protoPath)
-		this.lightning = new lnrpc.Lightning(lndHost, combinedCredentials)
+  private connected: boolean
+  constructor() {
+    // First call forces connection to lnd
+    this.connected = false
   }
 
-  /******************* Calls to lightning daemon *****************/
+  /******************* Queries sent to our lnd client *****************/
 
 	/* retrieve general info about one's own lightning daemon,
 	 * currently not used anywhere and was implemented for testing
@@ -109,12 +96,15 @@ export default class LndLib {
 	}
 	 */
 
-  /******************* Lnd helpers ****************/
+  /******************* Lnd Connection Maintenance ****************/
 
 	/** wrapper around the actual querying function
 	 * methodName: string representing actual function on gRPC
 	 * options: request options for method */
-	async _lndQuery(methodName: string, options: any): Promise < any > {
+  async _lndQuery(methodName: string, options: any): Promise < any > {
+    // for any call, ensure we are actually connected to our lnd client
+    if (!this.connected) await this.connect()
+    // execute lnd request
 		try {
 			const result = await new Promise((resolve, reject) => {
 				this.lightning[methodName](options, function(err: any, response: any) {
@@ -126,7 +116,38 @@ export default class LndLib {
 		} catch (e) {
 			throw e
 		}
-	}
+  }
+
+  /** A few reasons this is placed where it is:
+   * 1) Potential chance that connection to lnd client is disrupted
+   * at some point after we have already connected once and we need
+   * to re-establish the connection
+   * 2) It's awkward to call anywhere else because it would necessitate
+   * that we not only make an instance of our LndAccount in the index.js
+   * or account.js files, but we then have to run .connect() as well
+   * 3) The check to ensure it is connected is placed at the beginning
+   * of _lndQuery because it only needs to be coded once then instead of
+   * at the beginning of every request we make to _lndQuery
+   * 4) Very much a background function that one need not think about
+   * when making requests
+   */
+  async connect() {
+    // Default lnd host and port
+    const lndHost: string = 'localhost:10006'
+    // get ssl certificate
+    const lndCert = await this._getCert()
+    // macaroon credentials
+    const macaroonCreds = await this._getMacaroonCreds()
+    // combine credentials for lnrpc
+    const sslCreds = grpc.credentials.createSsl(lndCert)
+    const combinedCredentials = grpc.credentials.combineChannelCredentials(sslCreds, macaroonCreds)
+		// create lightning instance
+		// TODO make this path so that typescript compiles it at all times
+		const protoPath: string = './utils/rpc.proto'
+		const lnrpc = await this._loadDescriptor(protoPath)
+    this.lightning = new lnrpc.Lightning(lndHost, combinedCredentials)
+    this.connected = true
+  }
 
 	/** Loads the gRPC descriptor from the rpc.proto file
 	 * so that we can use it to create the lightning client */
@@ -202,3 +223,4 @@ export default class LndLib {
     }
   }
 }
+
