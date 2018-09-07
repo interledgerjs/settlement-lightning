@@ -2,27 +2,12 @@ import BigNumber from 'bignumber.js'
 import BtcPlugin = require('.')
 const BtpPacket = require('btp-packet')
 import * as IlpPacket from 'ilp-packet'
-import {
-  DataHandler,
-  MoneyHandler
-} from './utils/types'
-import {
-  promisify
-} from 'util'
-import {
-  randomBytes
-} from 'crypto'
-import {
-  BtpPacket,
-  BtpPacketData,
-  BtpSubProtocol
-} from 'ilp-plugin-btp'
-import {
-  validate as validateAddress
-} from 'bitcoin-address'
-import {
-  Channel
-} from './utils/lightning-types'
+import { DataHandler, MoneyHandler } from './utils/types'
+import { promisify } from 'util'
+import { randomBytes } from 'crypto'
+import { BtpPacket, BtpPacketData, BtpSubProtocol } from 'ilp-plugin-btp'
+import { Channel } from './utils/lightning-types'
+import LndLib from './utils/lndlib'
 
 // Used to denominate which assetScale we are using
 export enum Unit {
@@ -47,7 +32,7 @@ export const format = (num: BigNumber.Value, from: Unit) =>
 export const requestId = async() =>
   (await promisify(randomBytes)(4)).readUInt32BE(0)
 
-export default class BtcAccount {
+export default class LndAccount {
   // private master: LndPlugin
   private account: {
     settling: SettleState
@@ -58,21 +43,23 @@ export default class BtcAccount {
     channelId ? : string
   }
   private master: BtcPlugin
-  private sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
-    constructor(opts: {
-      accountName: string,
-      master: BtcPlugin,
-      sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
-    }) {
-      this.account = {
-        settling: SettleState.NotSettling,
-        isBlocked: false,
-        accountName: opts.accountName,
-        balance: new BigNumber(0)
-      }
-      this.master = opts.master
-      this.sendMessage = opts.sendMessage
+	private sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
+  private lnd: LndLib
+  constructor(opts: {
+    accountName: string,
+    master: BtcPlugin,
+    sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
+  }) {
+    this.account = {
+      settling: SettleState.NotSettling,
+      isBlocked: false,
+      accountName: opts.accountName,
+      balance: new BigNumber(0)
     }
+    this.master = opts.master
+    this.sendMessage = opts.sendMessage
+    this.lnd = new LndLib()
+  }
 
   addBalance(amount: BigNumber) {
     if (amount.isZero()) return
@@ -105,24 +92,32 @@ export default class BtcAccount {
     }
   }
 
-  async connect() {
-    const savedAccount = await this.master._store.loadObject(`account:${this.account.accountName}`)
+	/* Creates a store for each individual account, then attempts
+	 * to connect as peers over the Lightning network */
+	async connect() {
+		// Setting up account store
+		const accountName = this.account.accountName
+    const savedAccount = await this.master._store.loadObject(`account:${accountName}`)
 
     this.account = new Proxy({
       ...this.account,
       ...savedAccount
     }, {
       set: (account, key, val) => {
-        this.master._store.set(this.account.accountName, JSON.stringify({
+        this.master._store.set(accountName, JSON.stringify({
           ...account,
           [key]: val
         }))
         return Reflect.set(account, key, val)
       }
-    })
+		})
+
+    // peer over lightning
+    		
   }
 
-  async shareAddress(): Promise < void > {
+  /* Retrieve personal identity pubkey and send to peer */
+  async shareLndIdentityKey(): Promise < void > {
     const response = await this.sendMessage({
       type: BtpPacket.TYPE_MESSAGE,
       requestId: await requestId(),
@@ -131,7 +126,7 @@ export default class BtcAccount {
           protocolName: 'info',
           contentType: BtpPacket.MIME_APPLICATION_JSON,
           data: Buffer.from(JSON.stringify({
-            ethereumAddress: this.master._address
+            lndIdentityPubkey: this.master._lndIdentityPubkey
           }))
         }]
       }
@@ -163,8 +158,8 @@ export default class BtcAccount {
     }
   }
 
-  async fundOutgoingChannel(settlementBudget: BigNumber): Promise < BigNumber > {
-    let requiresNewChannel = false
+		/*
+	async fundOutgoingChannel(settlementBudget: BigNumber): Promise < void > {
     let requiresDeposit = false
     let channel: Channel | null
 
@@ -177,7 +172,8 @@ export default class BtcAccount {
         // TODO fund existing channel functionality
       }
     }
-  }
+	}
+		 */
 
   async attemptSettle() {}
 
