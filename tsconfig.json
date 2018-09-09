@@ -1,12 +1,14 @@
 {
   "compileOnSave": true,
   "compilerOptions": {
-    "target": "es5",
-    "lib": [
-      "ES2015"
-    ],
-    "strict": true,
+    "target": "es2017",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "inlineSources": true,
+		"strict": true,
     "downlevelIteration": true,
+    "suppressImplicitAnyIndexErrors": true,
+    "alwaysStrict": true,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
@@ -14,6 +16,10 @@
     "project": "."
   },
   "includes": [
-    "src/**.ts"
-  ]
+    "src/**/*",
+		"src/**/*.proto"
+  ],
+	"exclude": [
+		"build" 
+	]
 }
