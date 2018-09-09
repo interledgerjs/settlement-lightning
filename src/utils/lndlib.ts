@@ -9,37 +9,60 @@ process.env.GRPC_SSL_CIPHER_SUITES = 'HIGH+ECDSA'
 const sleep = require('util').promisify(setTimeout)
 
 export default class LndLib {
-  /* FIXME currently we don't need the constructor to do
-   * anything because the actual initialization is async, 
-   * there is def. a cleaner way to do this than just having 
-   * an empty constructor then having a .connect() step */
+
   private lightning: any
   private connected: boolean
   constructor() {
-    // First call forces connection to lnd
+    // First request connects to lnd
     this.connected = false
   }
 
-  /******************* Queries sent to our lnd client *****************/
+  /******************* Personal information queries*****************/
+
+  /** An important distinction to understand lightning:
+   *
+   * BTC public key: the public key that is used to
+   * directly identify oneself on the Bitcoin blockchain
+   *
+   * Lnd Identity Pubkey: the public key that is used to
+   * identify oneself on the lightning network, one step
+   * removed from the direct blockchain.
+   *
+   * Why is this distinction made? Because lightning was designed
+   * with the belief that you wouldn't need a payment channel to
+   * every peer you interact with, that the routing protocol they
+   * implemented would take care of that through intermediate peers.  
+   * Therefore, if you need to send an invoice / receive an 
+   * invoice from somebody, all you need to know is their identity
+   * pubkey so that you can ping them for invoices without needing
+   * to know their underlying BTC blockchain public key.
+   */
+  async getLndIdentityPubkey(): Promise < string > {
+    return (await this.getInfo()).identity_pubkey
+  }
 
 	/* retrieve general info about one's own lightning daemon,
-	 * currently not used anywhere and was implemented for testing
-	 * purposes */
+   * currently used to retrieve identity_pubkey, will likely be used
+   * in future to check for number of peers, active/pending channels, 
+   * and other general state */
 	async getInfo(): Promise < any > {
 		return await this._lndQuery('getInfo', {})
 	}
 
+  /******************** Peering functions ***********************/
+
 	/** attempts to establish a connection to a new peer, does nothing if already
 	 * connected
 	 * peerAddress: identity pubkey of peer node
-	 * peerHost: network location of lightning host e.g. localhost:10002
+	 * peerHost: host:port on peer listening for P2P connections
 	 */
-	async connectPeer(peerAddress: string, peerHost: string): Promise < string > {
+  async connectPeer(peerAddress: string, peerHost: string): Promise < string > {
+    console.log('peering!')
 		const opts = { addr : { pubkey: peerAddress, host: peerHost }}
 		return await this._lndQuery('connectPeer', opts)
 	}
 
-	/** retrieves a list of existing peers and checks a connection
+	/** retrieves a list of existing peers and checks if a connection
 	 * has already been established
 	 */
   async isPeer(peerIdentityPubKey: string): Promise < boolean > {
@@ -73,11 +96,8 @@ export default class LndLib {
     call.on('end', function () {
       console.log(`Channel of amount ${fundingAmt} opened with peer ${peerPubKey}`)
     })
-	}
-		 */
+  }
 
-	/* Commenting out to prevent tsc errors from not having 
-	 * implemented Channel interface yet
   async _getChannel(pub_key: string): Channel {
     const channels: Channel[] = this.lightning.listChannels()
     const filteredChannels: Channel[] = channels.channels.filter((c: any) => c.remote_pubkey == pub_key)
@@ -128,19 +148,17 @@ export default class LndLib {
    * 3) The check to ensure it is connected is placed at the beginning
    * of _lndQuery because it only needs to be coded once then instead of
    * at the beginning of every request we make to _lndQuery
-   * 4) Very much a background function that one need not think about
-   * when making requests
    */
   async connect() {
     // Default lnd host and port
     const lndHost: string = 'localhost:10006'
     // get ssl certificate
-    const lndCert = await this._getCert()
+    const lndCert = await this._getTlsCert()
     // macaroon credentials
     const macaroonCreds = await this._getMacaroonCreds()
     // combine credentials for lnrpc
-    const sslCreds = grpc.credentials.createSsl(lndCert)
-    const combinedCredentials = grpc.credentials.combineChannelCredentials(sslCreds, macaroonCreds)
+    const tlsCrds = grpc.credentials.createSsl(lndCert)
+    const combinedCredentials = grpc.credentials.combineChannelCredentials(tlsCrds, macaroonCreds)
 		// create lightning instance
 		// TODO make this path so that typescript compiles it at all times
 		const protoPath: string = './utils/rpc.proto'
@@ -161,7 +179,7 @@ export default class LndLib {
 	/** Retrieve the tls certificate from the user's local storage,
 	 * LND uses macaroons and tls certificates to authenticate
 	 * the gRPC client */
-  async _getCert(): Promise < string > {
+  async _getTlsCert(): Promise < string > {
     /* Retrieve default path of tls.cert for lnd according
 		 * to operating system of the user */
 		const certPath: string = (function (operatingSystem) {
@@ -205,8 +223,8 @@ export default class LndLib {
       }
     })(process.platform)
 
-		// FIXME hardcoding my dee's node path currently just for debugging
-		macaroonPath = '/Users/austinking/gocode/dev/ernie/data/chain/bitcoin/simnet/admin.macaroon'
+		// FIXME hardcoding my dee node's path currently just for debugging
+    //macaroonPath = '/Users/austinking/gocode/dev/ernie/data/chain/bitcoin/simnet/admin.macaroon'
 
 		/* Use path to query file and actually create the gRPC credentials object */
 		try {

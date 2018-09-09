@@ -1,5 +1,5 @@
 import BigNumber from 'bignumber.js'
-import BtcPlugin = require('.')
+import LndPlugin = require('.')
 const BtpPacket = require('btp-packet')
 import * as IlpPacket from 'ilp-packet'
 import { DataHandler, MoneyHandler } from './utils/types'
@@ -14,53 +14,51 @@ export enum Unit {
   BTC = 9, Satoshi = 0
 }
 
-// Used to track need to settle
-enum SettleState {
-  NotSettling,
-  Settling,
-  QueuedSettle
-}
-
 // Simple conversion for BTC <-> Satoshi
 export const convert = (num: BigNumber.Value, from: Unit, to: Unit): BigNumber =>
   new BigNumber(num).shiftedBy(from - to)
 
-// Prints our debug info nicely
 export const format = (num: BigNumber.Value, from: Unit) =>
   convert(num, from, Unit.Satoshi) + ' BTC'
+
+export const getSubProtocol = (message: BtpPacket, name: string) =>
+  message.data.protocolData.find((p: BtpSubProtocol) => p.protocolName === name)
 
 export const requestId = async() =>
   (await promisify(randomBytes)(4)).readUInt32BE(0)
 
+/** Performs functionality for both the server and client plugins. */
 export default class LndAccount {
-  // private master: LndPlugin
   private account: {
-    settling: SettleState
     isBlocked: boolean
     accountName: string
     balance: BigNumber
     address ? : string
     channelId ? : string
+    lndIdentityPubkey ? : string
   }
-  private master: BtcPlugin
-	private sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
+  private master: LndPlugin
+  // method in which BTP packets will be sent
+  private sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
+  // All lightning logic is performed using LndLib
   private lnd: LndLib
+
   constructor(opts: {
     accountName: string,
-    master: BtcPlugin,
+    master: LndPlugin,
     sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
   }) {
     this.account = {
-      settling: SettleState.NotSettling,
       isBlocked: false,
       accountName: opts.accountName,
-      balance: new BigNumber(0)
+      balance: new BigNumber(0),
     }
     this.master = opts.master
     this.sendMessage = opts.sendMessage
     this.lnd = new LndLib()
   }
 
+  /** Currently unused because we have not implemented balance logic yet. */
   addBalance(amount: BigNumber) {
     if (amount.isZero()) return
     if (amount.lt(0)) throw new Error('cannot add negative amount to balance')
@@ -76,6 +74,7 @@ export default class LndAccount {
     this.master._log.trace(`Debited ${format(amount, Unit.Satoshi)} from account ${this.account.accountName}, new balance is ${format(newBalance, Unit.Satoshi)}`)
   }
 
+  /** Unusued */
   subBalance(amount: BigNumber) {
     if (amount.isZero()) return
     if (amount.lt(0)) throw new Error('cannot subtract negative amount from balance')
@@ -95,11 +94,15 @@ export default class LndAccount {
 	/* Creates a store for each individual account, then attempts
 	 * to connect as peers over the Lightning network */
 	async connect() {
-		// Setting up account store
+    // Setting up account store
+
+    /* Currently untested -- will ensure working in next push
+     *
 		const accountName = this.account.accountName
     const savedAccount = await this.master._store.loadObject(`account:${accountName}`)
 
     this.account = new Proxy({
+      // concat new account to list of previous accounts
       ...this.account,
       ...savedAccount
     }, {
@@ -110,15 +113,19 @@ export default class LndAccount {
         }))
         return Reflect.set(account, key, val)
       }
-		})
+    })
+     */
 
-    // peer over lightning
-    		
+    // Clients initiate the exchange of lnd identity pubkeys
+    if (this.master._role === 'client') {
+      this.master._log.trace(`Sharing identity pubkey with server.`)
+      await this.exchangeIdentityPubkeys()
+    }
   }
 
-  /* Retrieve personal identity pubkey and send to peer */
-  async shareLndIdentityKey(): Promise < void > {
-    const response = await this.sendMessage({
+  /* Send personal identity pubkey to peer*/
+  async exchangeIdentityPubkeys(): Promise < void > {
+    await this.sendMessage({
       type: BtpPacket.TYPE_MESSAGE,
       requestId: await requestId(),
       data: {
@@ -126,58 +133,87 @@ export default class LndAccount {
           protocolName: 'info',
           contentType: BtpPacket.MIME_APPLICATION_JSON,
           data: Buffer.from(JSON.stringify({
-            lndIdentityPubkey: this.master._lndIdentityPubkey
+            lndIdentityPubkey: this.master._lndIdentityPubkey,
+            lndPeeringHost: this.master._lndPeeringHost
           }))
         }]
       }
     })
   }
 
-  linkAddress(info: BtpSubProtocol): void {
-    const {
-      address
-    } = JSON.parse(info.data.toString())
-
-    if (this.account.address) {
-      /* for some reason Kincaid's ETH version checks: 
-       * if (this.account.address.toLowerCase === address.toLowerCase()) :
-       * return True
-       * Not sure why that makes a difference if they don't match because he
-       * logs the message this address is already linked if not, so I'm not sure
-       * what the lowercasing has to do with why we would instead do nothing
-       * instead of logging that it already exists */
-      return this.master._log.trace(`Cannot link BTC address ${address} to account ` +
-        `${this.account.accountName}: ${this.account.address} is already linked`)
-    }
-
-    if (validateAddress(address)) {
-      this.account.address = address
-      this.master._log.trace(`Successfully linked address ${address} to account ${this.account.accountName}`)
-    } else {
-      this.master._log.trace(`Failed to link address: ${address} is not a valid address`)
-    }
-  }
-
-		/*
-	async fundOutgoingChannel(settlementBudget: BigNumber): Promise < void > {
-    let requiresDeposit = false
-    let channel: Channel | null
-
-    // Check if channel already exists
-    if (typeof (this.account.channel) === 'string') {
-      channel = await this._getChannel()
-      // if channel does not exist, just create a new one
-      if (!channel) return lndlib.createChannel()
-      if (settlementBudget.gt(channel.local_balance)) {
-        // TODO fund existing channel functionality
-      }
-    }
-	}
-		 */
 
   async attemptSettle() {}
 
+  /** Handles peering requests and ILP PREPARE requests.
+   * Peering:
+   * When a client establishes a connection to a server they send their
+   * lndIdentityPubkey and lndPeeringHost to the server.  The server then
+   * makes a lightning peering request using that information.
+   *
+   * Why are we not opening payment channels?
+   * In this implementation we are leaving that as out of scope.  We are
+   * operating under the assumption that as long as both client and server
+   * have a channel connected to the greater lightning network that the 
+   * routing protocol implemented in lightning will take care of ensuring
+   * the payment can be sent.
+   *
+   * In future implementations we will open a channel between the client and
+   * server.  Hopefully both the server and client will already be connected to the
+   * greater lightning network before this so we can make payments while the BTC
+   * blockchain opens the payment channel between the two.
+   *
+   * Opening channels directly to connectors:
+   * Benefits: connectors will become hubs in the lightning network to route
+   * payments more efficiently and ensure sufficient liquidity for larger
+   * payments
+   *
+   * Downsides: BTC is very slow, so having liquidity tied up in n payment
+   * makes the connector less responsive in case it needs to adjust it's
+   * liquidity.
+   *
+   * ILP PREPARE:
+   * TODO
+   */
   async handleData(message: BtpPacket, dataHandler ? : DataHandler): Promise < BtpSubProtocol[] > {
+    const peeringInfo = getSubProtocol(message, 'info')
+    const ilp = getSubProtocol(message, 'ilp') 
+    
+    // Websocket relationship established, now connect as peers on lightning
+    if (peeringInfo) {
+
+      // parse out peer's peering information
+      const { lndIdentityPubkey, lndPeeringHost } = JSON.parse(peeringInfo.data.toString())
+      
+      if (await this.lnd.isPeer(lndIdentityPubkey)) {
+
+        this.master._log.trace(`Peer with lndIdentityPubkey: ${lndIdentityPubkey} is already ` + 
+          `connected to account: ${this.account.accountName}`)
+        return []
+
+      } else {
+
+        this.master._log.trace(`No pre-existing lightning peer relationship.  Attempting to ` +
+          `peer now.`)
+
+        await this.lnd.connectPeer(lndIdentityPubkey, lndPeeringHost)
+        
+        // ensure peering success
+        if (await this.lnd.isPeer(lndIdentityPubkey)) {
+          this.master._log.trace(`Successfully peered over lightning.`)
+        } else {
+          throw new Error(`connectPeer failed to add peer!`)
+        }
+        
+        /* LND peering relationships are bidirectional, so no
+         * need to send back server's identity pubkey */
+        return []
+      }
+    }
+
+    // TODO handle incoming ILP PREPARE packets
+    if (ilp) {
+      console.log('implement me!')
+    }
     return []
   }
 
