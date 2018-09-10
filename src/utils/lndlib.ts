@@ -17,7 +17,7 @@ export default class LndLib {
     this.connected = false
   }
 
-  /******************* Personal information queries*****************/
+  /******************* Personal information queries *****************/
 
   /** An important distinction to understand lightning:
    *
@@ -37,6 +37,7 @@ export default class LndLib {
    * pubkey so that you can ping them for invoices without needing
    * to know their underlying BTC blockchain public key.
    */
+
   async getLndIdentityPubkey(): Promise < string > {
     return (await this.getInfo()).identity_pubkey
   }
@@ -47,7 +48,17 @@ export default class LndLib {
    * and other general state */
 	async getInfo(): Promise < any > {
 		return await this._lndQuery('getInfo', {})
-	}
+  }
+
+  /******************** Payment functionality ******************/
+
+  /** Creates an invoice for the amount requested.  Returns
+   * the payment_request which will be sent to the person
+   * desiring to pay so that they can complete the payment 
+   */
+  async addInvoice(amt: number) : Promise < string > {
+    return await this._lndQuery('addInvoice', { value : amt })
+  }
 
   /******************** Peering functions ***********************/
 
@@ -224,7 +235,7 @@ export default class LndLib {
     })(process.platform)
 
 		// FIXME hardcoding my dee node's path currently just for debugging
-    //macaroonPath = '/Users/austinking/gocode/dev/ernie/data/chain/bitcoin/simnet/admin.macaroon'
+    macaroonPath = '/Users/austinking/gocode/dev/ernie/data/chain/bitcoin/simnet/admin.macaroon'
 
 		/* Use path to query file and actually create the gRPC credentials object */
 		try {
