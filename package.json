@@ -17,15 +17,14 @@
     "@grpc/proto-loader": "^0.3.0",
     "@types/debug": "0.0.30",
     "bignumber.js": "^7.2.1",
-    "bitcoin-address": "^0.3.0",
     "btp-packet": "^1.2.0",
     "debug": "^3.1.0",
     "eventemitter2": "^5.0.1",
-    "grpc": "^1.14.1",
+    "grpc": "^1.14.2",
     "ilp-logger": "^1.0.2",
-    "ilp-plugin-btp": "^1.2.0",
-    "ilp-plugin-mini-accounts": "^3.5.1",
-    "typescript": "^3.0.1"
+    "ilp-plugin-btp": "github:kincaidoneil/ilp-plugin-btp",
+    "ilp-plugin-mini-accounts": "github:kincaidoneil/ilp-plugin-mini-accounts",
+    "typescript": "^3.0.3"
   },
   "devDependencies": {
     "@types/jest": "^23.3.1",
