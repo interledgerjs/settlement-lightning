@@ -9,7 +9,7 @@ import BtpPlugin, { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
 import MiniAccountsPlugin from 'ilp-plugin-mini-accounts'
 import LndAccount, { requestId, convert, Unit } from './account'
 const BtpPacket = require('btp-packet')
-//import StoreWrapper from './store-wrapper'
+import StoreWrapper from './utils/store-wrapper'
 
 interface LndPluginOpts {
   _role: 'client' | 'server'
@@ -27,6 +27,8 @@ interface LndPluginOpts {
   _lndIdentityPubkey: string
   /* 'host:port' that is listening for P2P lightning connections */
   _lndPeeringHost: string
+  // max satoshis permitted in each packet
+  maxPacketAmount?: BigNumber.Value
 }
 
 /* Master class that creates a sub-plugin using _role.  This
@@ -52,9 +54,14 @@ class LndPlugin extends EventEmitter2 implements LndPluginOpts {
 	readonly _role: 'client' | 'server'
   private readonly _plugin: LndServerPlugin | LndClientPlugin
   _channels: Map<string, string> // ChannelId -> accountName
+  readonly _maxPacketAmount: BigNumber
 
   constructor(opts: LndPluginOpts) {
     super()
+
+    this._maxPacketAmount = new BigNumber(opts.maxPacketAmount || Infinity)
+      .abs().dp(0, BigNumber.ROUND_DOWN)
+
     this._balance = {
       minimum: new BigNumber((opts._balance && opts._balance.minimum) || Infinity)
         .dp(0, BigNumber.ROUND_FLOOR),
@@ -86,7 +93,7 @@ class LndPlugin extends EventEmitter2 implements LndPluginOpts {
 
 		this._channels = new Map()
 
-    //this._store = new StoreWrapper(opts._store)
+    this._store = new StoreWrapper(opts._store)
   }
 
   async connect() {
