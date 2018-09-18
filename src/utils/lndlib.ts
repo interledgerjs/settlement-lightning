@@ -60,6 +60,39 @@ export default class LndLib {
     return await this._lndQuery('addInvoice', { value : amt })
   }
 
+  async decodePayReq(payment_request : string) : Promise < any > {
+    return await this._lndQuery('decodePayReq', { pay_req : payment_request })
+  }
+
+  async payInvoice(paymentRequest: string) : Promise < void > {
+    const opts = { payment_request: paymentRequest }
+    const resp = await this._lndQuery('sendPaymentSync', opts)
+    const error = resp.payment_error
+
+    // TODO find other payment_error types and implement handling for them
+    // error handling
+    if (error === 'invoice is already paid') {
+      throw new Error('Attempted to pay invoice that has already been paid.')
+    }
+
+    return resp.payment_preimage
+  }
+
+  /******************** Past payment querying ****************/
+
+  async getFulfilledPayment(paymentPreimage: string) : Promise < any > {
+    const pastPayments = await this.listPayments()
+    const payment = pastPayments.find((obj: any) => obj.payment_preimage === paymentPreimage)
+    if (payment) {
+      return payment
+    }
+    return
+  }
+
+  async listPayments() : Promise < Object[] > {
+    return await this._lndQuery('listPayments', {})
+  }
+
   /******************** Peering functions ***********************/
 
 	/** attempts to establish a connection to a new peer, does nothing if already
@@ -68,7 +101,6 @@ export default class LndLib {
 	 * peerHost: host:port on peer listening for P2P connections
 	 */
   async connectPeer(peerAddress: string, peerHost: string): Promise < string > {
-    console.log('peering!')
 		const opts = { addr : { pubkey: peerAddress, host: peerHost }}
 		return await this._lndQuery('connectPeer', opts)
 	}
