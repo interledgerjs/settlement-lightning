@@ -4,6 +4,7 @@ const process = require('process')
 const path = require('path')
 const protoLoader = require('@grpc/proto-loader')
 const promisify = require('util').promisify
+import BigNumber from 'bignumber.js'
 process.env.GRPC_SSL_CIPHER_SUITES = 'HIGH+ECDSA'
 
 const sleep = require('util').promisify(setTimeout)
@@ -78,19 +79,23 @@ export default class LndLib {
     return resp.payment_preimage
   }
 
-  /******************** Past payment querying ****************/
+  /******************** Past invoice querying ****************/
 
-  async getFulfilledPayment(paymentPreimage: string) : Promise < any > {
-    const pastPayments = await this.listPayments()
-    const payment = pastPayments.find((obj: any) => obj.payment_preimage === paymentPreimage)
-    if (payment) {
-      return payment
-    }
-    return
+  invoiceAmount(invoice: any) : BigNumber {
+    return invoice.value
   }
 
-  async listPayments() : Promise < Object[] > {
-    return await this._lndQuery('listPayments', {})
+  isFulfilledInvoice(invoice: any) : boolean {
+    return invoice.settled
+  }
+
+  async getInvoice(paymentRequest: string) : Promise < any > {
+    const pastPayments = await this.listInvoices()['invoices']
+    return pastPayments.find((obj: any) => obj.payment_request === paymentRequest)
+  }
+
+  async listInvoices() : Promise < any > {
+    return (await this._lndQuery('listInvoices', {}))['invoices']
   }
 
   /******************** Peering functions ***********************/
