@@ -19,7 +19,7 @@ export const convert = (num: BigNumber.Value, from: Unit, to: Unit): BigNumber =
   new BigNumber(num).shiftedBy(from - to)
 
 export const format = (num: BigNumber.Value, from: Unit) =>
-  convert(num, from, Unit.Satoshi) + ' BTC'
+  convert(num, from, Unit.Satoshi) + ' Satoshis'
 
 export const getSubProtocol = (message: BtpPacket, name: string) =>
   message.data.protocolData.find((p: BtpSubProtocol) => p.protocolName === name)
@@ -185,8 +185,8 @@ export default class LndAccount {
         return this.master._log.trace('Cannot settle. Settle threshold is undefined')
       }
       
-      const shouldSettle = settleThreshold.gt(this.account.balance)
       // determine if we need to settle
+      const shouldSettle = settleThreshold.gt(this.account.balance)
       if (!shouldSettle) {
         return this.master._log.trace(`Should not settle.  Balance of ` + 
           `${format(this.account.balance, Unit.Satoshi)} is not below ` +
@@ -198,8 +198,8 @@ export default class LndAccount {
       this.master._log.trace(`Attempting to settle with account ` + 
         `${this.account.accountName} for ${format(settlementAmount, Unit.Satoshi)}`)
 
+      // Request an invoice from peer
       const paymentRequest = await this.requestInvoice(settlementAmount)
-      this.validateInvoice(paymentRequest, settlementAmount)
       // TODO implement a check to ensure we have enough funds in channel
       // conencted to lightning network to actually pay amount for invoice
       const paymentPreimage = await this.lnd.payInvoice(paymentRequest)
@@ -218,6 +218,11 @@ export default class LndAccount {
           }]
         }
       }).catch(err => {
+        /** TODO handle this properly.  It doesnt' matter that this fails when
+         * sending a claim, but it does matter when we're using invoices because
+         * the amount has already been paid so this is a definite issue. 
+         * Write a check that if balances ever get off we send proof of our
+         * past invoice payment so other side can update balance? */
         this.master._log.error(`Error while sending payment preimage in ` + 
           `response to invoice with paymentRequest: ${paymentRequest}, ` +
           `balance between accounts will be imbalanced`)
@@ -227,49 +232,62 @@ export default class LndAccount {
     }
   }
 
-
   /***************** Invoice logic *******************/
-
-  /** Ensures received invoice matches the requested destination 
-   * and payment amount */
-  async validateInvoice(paymentRequest: string, amt: BigNumber) : Promise < void > {
-    const decodedInvoice = await this.lnd.decodePayReq(paymentRequest)
-     
-    const invoiceDestination = decodedInvoice.destination 
-    if (invoiceDestination !== this.master._lndIdentityPubkey) {
-      throw new Error(`Invoice destination: ${invoiceDestination} does not ` +
-        `match peer destination: ${this.master._lndIdentityPubkey}`)
-    }
-
-    const invoiceAmt = decodedInvoice.num_satoshis
-    if (invoiceAmt !== amt) {
-      throw new Error(`Invoice amount: ${format(invoiceAmt, Unit.Satoshi)} ` +
-        `does not match requested amount: ${format(amt, Unit.Satoshi)}`)
-    }
-  }
 
   /* Ask peer to generate invoice that you can fulfill */ 
   async requestInvoice(amt: BigNumber): Promise < string > {
-    // TODO make timeout race
-    const response = await this.sendMessage({
-      type: BtpPacket.TYPE_MESSAGE,
-      requestId: await requestId(),
-      data: {
-        protocolData: [{
-          protocolName: 'invoice',
-          contentType: BtpPacket.MIME_APPLICATION_JSON,
-          data: Buffer.from(JSON.stringify({
-            amount: amt
-          }))
-        }]
+    try {
+
+      // request an invoice paymentRequest from peer
+      const response = await this.sendMessage({
+        type: BtpPacket.TYPE_MESSAGE,
+        requestId: await requestId(),
+        data: {
+          protocolData: [{
+            protocolName: 'invoiceRequest',
+            contentType: BtpPacket.MIME_APPLICATION_JSON,
+            data: Buffer.from(JSON.stringify({
+              amount: amt
+            }))
+          }]
+        }
+      })
+
+      // validate received paymentRequest
+      const subProtocol = response.protocolData.find((p: BtpSubProtocol) => p.protocolName === 'invoiceResponse')
+      if (subProtocol) {
+        const { paymentRequest } = JSON.parse(subProtocol.data.toString())
+        try {
+          await this.validatePaymentRequest(paymentRequest, amt)
+          return paymentRequest
+        } catch (err) {
+          throw new Error(`Requested invoice is invalid: ${err.message}`)
+        }
+      } else {
+        throw new Error('BTP response to requestInvoice did not include invoice data.')
       }
-    })
-    const subProtocol = response.protocolData.find((p: BtpSubProtocol) => p.protocolName === 'invoice')
-    if (subProtocol) {
-      const { paymentRequest } = JSON.parse(subProtocol.data.toString())
-      return paymentRequest
-    } else {
-      throw new Error('BTP response to requestInvoice did not include invoice data.')
+    } catch (err) {
+      this.master._log.trace(`Failed to request invoice: ${err.message}`)
+    }
+  }
+
+  async validatePaymentRequest(paymentRequest: string, amt: BigNumber) : Promise < void > {
+    const invoice = await this.lnd.decodePayReq(paymentRequest)
+    this.validateInvoiceDestination(invoice)
+    this.validateInvoiceAmount(invoice, amt)
+  }
+
+  validateInvoiceDestination(invoice: any) : boolean {
+    if (!invoice.destination == this.account.lndIdentityPubkey) {
+      throw new Error(`Invoice destination: ${invoiceDestination} does not ` +
+        `match peer destination: ${this.master._lndIdentityPubkey}`)
+    }
+  }
+
+  validateInvoiceAmount(invoice: any, amt: BigNumber) : boolean {
+    if (!invoice.num_satoshis == amt) {
+      throw new Error(`Invoice amount: ${format(invoiceAmt, Unit.Satoshi)} ` +
+        `does not match requested amount: ${format(amt, Unit.Satoshi)}`)
     }
   }
 
@@ -284,7 +302,7 @@ export default class LndAccount {
     this.master._log.trace(`Responding with paymentRequest: ${paymentRequest}`)
     // format response invoice packet containing the payment request
     return [{
-      protocolName: 'invoice',
+      protocolName: 'invoiceResponse',
       contentType: BtpPacket.MIME_APPLICATION_JSON,
       data: Buffer.from(JSON.stringify({
         paymentRequest: paymentRequest
@@ -327,7 +345,7 @@ export default class LndAccount {
   async handleData(message: BtpPacket, dataHandler ? : DataHandler): Promise < BtpSubProtocol[] > {
     const peeringInfo = getSubProtocol(message, 'peeringInfo')
     const ilp = getSubProtocol(message, 'ilp') 
-    const invoice = getSubProtocol(message, 'invoice')
+    const invoice = getSubProtocol(message, 'invoiceRequest')
 
     // Websocket relationship established, now connect as peers on lightning
     if (peeringInfo) {
@@ -335,6 +353,7 @@ export default class LndAccount {
       const { lndIdentityPubkey, lndPeeringHost } = JSON.parse(peeringInfo.data.toString())
       this.master._log.trace(`Peering request received from ${lndIdentityPubkey}`)
       await this.peer(lndIdentityPubkey, lndPeeringHost)
+      // TODO send back signal saying we peered so other side can confirm
     }
 
     /* parse subProtocol for amount, generate new lightning invoice for that amount,
@@ -427,14 +446,15 @@ export default class LndAccount {
       const paidInvoice = getSubProtocol(message, 'paidInvoice')
       if (paidInvoice) {
         this.master._log.trace(`Handling paid invoice for account ${this.account.accountName}`)
-        const paymentPreimage = JSON.parse(paidInvoice.data.toString())
-          
-        const payment = await this.lnd.getFulfilledPayment(paymentPreimage)
+        // check validity through matching sent preimage to fulfilled invoice
+        const paymentRequest = JSON.parse(paidInvoice.data.toString())
+        const invoice = await this.lnd.getInvoice(paymentRequest)
 
-        if (payment) {
-          this.subBalance(payment.value)
+        if (this.lnd.isFulfilledInvoice(invoice)) {
+          this.master._log.trace(`Updated balance after settlement with ${this.account.accountName}`)
+          this.subBalance(this.lnd.invoiceAmount(invoice))
         } else {
-          this.master._log.trace('Payment preimage does not correspond to any fulfilled payments') 
+          this.master._log.trace('Payment request does not correspond to a settled invoice') 
         }
       } else {
         this.master._log.trace(`BTP packet did not include 'paidInvoice' subprotocol data`)
