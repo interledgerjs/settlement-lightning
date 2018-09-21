@@ -36,6 +36,7 @@ export default class LndAccount {
     lndIdentityPubkey ? : string
   }
 
+  // top level plugin
   private master: LndPlugin
   // method in which BTP packets will be sent
   private sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
@@ -50,41 +51,9 @@ export default class LndAccount {
     this.master = opts.master
     this.lnd = new LndLib()
     this.sendMessage = opts.sendMessage
-
     this.account = {
       accountName: opts.accountName,
       balance: new BigNumber(0),
-    }
-  }
-
-  addBalance(amount: BigNumber) {
-    if (amount.isZero()) return
-    if (amount.lt(0)) throw new Error('cannot add negative amount to balance')
-
-    const maximum = this.master._balance.maximum
-    const newBalance = this.account.balance.plus(amount)
-
-    if (newBalance.gt(maximum)) {
-      throw new Error(`Cannot debit ${format(amount, Unit.Satoshi)} from account ${this.account.accountName}, ` +
-        `proposed balance of ${format(newBalance, Unit.Satoshi)} exceeds maximum of ${format(maximum, Unit.Satoshi)}`)
-    }
-
-    this.master._log.trace(`Debited ${format(amount, Unit.Satoshi)} from account ${this.account.accountName}, new balance is ${format(newBalance, Unit.Satoshi)}`)
-  }
-
-  subBalance(amount: BigNumber) {
-    if (amount.isZero()) return
-    if (amount.lt(0)) throw new Error('cannot subtract negative amount from balance')
-
-    const minimum = this.master._balance.minimum
-    const newBalance = this.account.balance.minus(amount)
-
-    if (newBalance.lt(minimum)) {
-      throw new Error(`Cannot credit ${format(amount, Unit.Satoshi)} to account ${this.account.accountName}, ` +
-        `proposedBalance of ${format(newBalance, Unit.Satoshi)} is below the minimum of ${format(minimum, Unit.Satoshi)}`)
-
-      this.master._log.trace(`Credited ${format(amount, Unit.Satoshi)} to account ${this.account.accountName}, ` + ` new balance is ${format(newBalance, Unit.Satoshi)}`)
-      this.account.balance = newBalance
     }
   }
 
@@ -93,20 +62,15 @@ export default class LndAccount {
 	/* Creates a store for each individual account, then attempts
 	 * to connect as peers over the Lightning network */
 	async connect() {
-    // Setting up account store
-
     // retrieve account
     const accountKey = `${this.account.accountName}:account`
     await this.master._store.loadObject(accountKey)
-
-    // if account didn't exist, create new empty one
     const savedAccount = this.master._store.getObject(accountKey) || {}
-
     // If properties exist, convert to BigNumbers
     if (typeof savedAccount.balance === 'string') {
       savedAccount.balance = new BigNumber(savedAccount.balance)
     }
-
+    // load account class variable
     this.account = new Proxy({
       // concat new account to list of previous accounts
       ...this.account,
@@ -120,7 +84,6 @@ export default class LndAccount {
         return Reflect.set(account, key, val)
       }
     })
-
     // Clients initiate the exchange of lnd identity pubkeys
     if (this.master._role === 'client') {
       this.master._log.trace(`Sharing identity pubkey with server.`)
@@ -128,15 +91,24 @@ export default class LndAccount {
     }
   }
 
-  /* Send personal identity pubkey to peer*/
+
+  /*********************** Lightning peering ***********************/
+
+  /* Send personal identity pubkey to server*/
   async sendPeeringInfo(): Promise < void > {
-    // TODO check for existing peers and see if we are already connected
-    await this.sendMessage({
+    if (this.account.lndIdentityPubkey) {
+      if (this.lnd.isPeer(this.account.lndIdentityPubkey)) {
+        this.master._log.trace(`Already peered with : ${this.account.lndIdentityPubkey}`)
+        return
+      }
+    }
+    // if not already peered, share peering host and identity pubkey
+    const response = await this.sendMessage({
       type: BtpPacket.TYPE_MESSAGE,
       requestId: await requestId(),
       data: {
         protocolData: [{
-          protocolName: 'peeringInfo',
+          protocolName: 'peeringRequest',
           contentType: BtpPacket.MIME_APPLICATION_JSON,
           data: Buffer.from(JSON.stringify({
             lndIdentityPubkey: this.master._lndIdentityPubkey,
@@ -145,24 +117,36 @@ export default class LndAccount {
         }]
       }
     })
+    const subProtocol = response.protocolData.find((p: BtpSubProtocol) => p.protocolName === 'peeringResponse')
+    if (subProtocol) {
+      const { lndIdentityPubkey } = JSON.parse(subProtocol.data.toString())
+      if (!this.lnd.isPeer(lndIdentityPubkey)) {
+        throw new Error(`Received peeringResponse without existing peer relationship over lightning`)
+      }
+      this.account.lndIdentityPubkey = lndIdentityPubkey
+      this.master._log.trace(`Succesfully peered with server over lightning.`)
+    } else {
+      throw new Error(`Received improper response to peeringRequest`)
+    }
   }
 
   /** LND peering relationships are bidirectional, so no
   * need to send back server's identity pubkey */
-  async peer(lndIdentityPubkey: string, lndPeeringHost: string) : Promise < void > {
+  async peer(lndIdentityPubkey: string, lndPeeringHost: string) : Promise < BtpSubProtocol[] > {
+    await this.lnd.connectPeer(lndIdentityPubkey, lndPeeringHost)
+    // ensure peering success
     if (await this.lnd.isPeer(lndIdentityPubkey)) {
-      this.master._log.trace(`Peer with lndIdentityPubkey: ${lndIdentityPubkey} is already ` + 
-        `connected to account: ${this.account.accountName}`)
+      this.master._log.trace(`Successfully peered with: ${lndIdentityPubkey}`)
+      // respond with identity pubkey so client can save in account
+      return [{
+        protocolName: 'peeringResponse',
+        contentType: BtpPacket.MIME_APPLICATION_JSON,
+        data: Buffer.from(JSON.stringify({
+          lndIdentityPubkey: this.master._lndIdentityPubkey
+        }))
+      }]
     } else {
-      this.master._log.trace(`No pre-existing lightning peer relationship.  Attempting to ` +
-        `peer now.`)
-      await this.lnd.connectPeer(lndIdentityPubkey, lndPeeringHost)
-      // ensure peering success
-      if (await this.lnd.isPeer(lndIdentityPubkey)) {
-        this.master._log.trace(`Successfully peered over lightning.`)
-      } else {
-        throw new Error(`Failed to add peer with identity pubkey: ${lndIdentityPubkey}`)
-      }
+      throw new Error(`Failed to add peer with identity pubkey: ${lndIdentityPubkey}`)
     }
   }
 
@@ -292,7 +276,7 @@ export default class LndAccount {
   /** Accept an amount to create an invoice and format the
    * response as a protocolData to send back to the user
    * that requested the invoice */
-  async handleInvoiceRequest(amt: number) : Promise < any > {
+  async handleInvoiceRequest(amt: number) : Promise < BtpSubProtocol[] > {
     // Retrieve new invoice from lnd client
     const invoice = await this.lnd.addInvoice(amt)
     const paymentRequest = invoice['payment_request']
@@ -341,17 +325,16 @@ export default class LndAccount {
    * TODO
    */
   async handleData(message: BtpPacket, dataHandler ? : DataHandler): Promise < BtpSubProtocol[] > {
-    const peeringInfo = getSubProtocol(message, 'peeringInfo')
+    const peeringRequest = getSubProtocol(message, 'peeringRequest')
     const ilp = getSubProtocol(message, 'ilp') 
     const invoice = getSubProtocol(message, 'invoiceRequest')
 
     // Websocket relationship established, now connect as peers on lightning
-    if (peeringInfo) {
+    if (peeringRequest) {
       // parse out peer's peering information
-      const { lndIdentityPubkey, lndPeeringHost } = JSON.parse(peeringInfo.data.toString())
+      const { lndIdentityPubkey, lndPeeringHost } = JSON.parse(peeringRequest.data.toString())
       this.master._log.trace(`Peering request received from ${lndIdentityPubkey}`)
-      await this.peer(lndIdentityPubkey, lndPeeringHost)
-      // TODO send back signal saying we peered so other side can confirm
+      return await this.peer(lndIdentityPubkey, lndPeeringHost)
     }
 
     /* parse subProtocol for amount, generate new lightning invoice for that amount,
@@ -468,4 +451,31 @@ export default class LndAccount {
   async afterForwardResponse(preparePacket: IlpPacket.IlpPacket, responsePacket: IlpPacket.IlpPacket): Promise < void > {}
 
   async disconnect() {}
+
+  /*********** Balance adjustment logging and error checking ************/
+
+  addBalance(amount: BigNumber) {
+    if (amount.isZero()) return
+    if (amount.lt(0)) throw new Error('cannot add negative amount to balance')
+    const maximum = this.master._balance.maximum
+    const newBalance = this.account.balance.plus(amount)
+    if (newBalance.gt(maximum)) {
+      throw new Error(`Cannot debit ${format(amount, Unit.Satoshi)} from account ${this.account.accountName}, ` +
+        `proposed balance of ${format(newBalance, Unit.Satoshi)} exceeds maximum of ${format(maximum, Unit.Satoshi)}`)
+    }
+    this.master._log.trace(`Debited ${format(amount, Unit.Satoshi)} from account ${this.account.accountName}, new balance is ${format(newBalance, Unit.Satoshi)}`)
+  }
+
+  subBalance(amount: BigNumber) {
+    if (amount.isZero()) return
+    if (amount.lt(0)) throw new Error('cannot subtract negative amount from balance')
+    const minimum = this.master._balance.minimum
+    const newBalance = this.account.balance.minus(amount)
+    if (newBalance.lt(minimum)) {
+      throw new Error(`Cannot credit ${format(amount, Unit.Satoshi)} to account ${this.account.accountName}, ` +
+        `proposedBalance of ${format(newBalance, Unit.Satoshi)} is below the minimum of ${format(minimum, Unit.Satoshi)}`)
+      this.master._log.trace(`Credited ${format(amount, Unit.Satoshi)} to account ${this.account.accountName}, ` + ` new balance is ${format(newBalance, Unit.Satoshi)}`)
+      this.account.balance = newBalance
+    }
+  }
 }
