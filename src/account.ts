@@ -31,12 +31,8 @@ export const requestId = async() =>
 export default class LndAccount {
 
   private account: {
-    isBlocked: boolean
     accountName: string
     balance: BigNumber
-    payoutAmount: BigNumber
-    address ? : string
-    channelId ? : string
     lndIdentityPubkey ? : string
   }
 
@@ -56,10 +52,8 @@ export default class LndAccount {
     this.sendMessage = opts.sendMessage
 
     this.account = {
-      isBlocked: false,
       accountName: opts.accountName,
       balance: new BigNumber(0),
-      payoutAmount: this.master._balance.settleTo.gt(0) ? new BigNumber(Infinity) : new BigNumber(0)
     }
   }
 
@@ -111,9 +105,6 @@ export default class LndAccount {
     // If properties exist, convert to BigNumbers
     if (typeof savedAccount.balance === 'string') {
       savedAccount.balance = new BigNumber(savedAccount.balance)
-    }
-    if (typeof savedAccount.payoutAmount === 'string') {
-      savedAccount.payoutAmount = new BigNumber(savedAccount.payoutAmount)
     }
 
     this.account = new Proxy({
