@@ -11,7 +11,7 @@ import { ilpAndCustomToProtocolData } from 'ilp-plugin-btp/src/protocol-data-con
 
 // Used to denominate which assetScale we are using
 export enum Unit {
-  BTC = 9, Satoshi = 0
+  BTC = 8, Satoshi = 0
 }
 
 // Simple conversion for BTC <-> Satoshi
@@ -90,7 +90,6 @@ export default class LndAccount {
       await this.sendPeeringInfo()
     }
   }
-
 
   /*********************** Lightning peering ***********************/
 
@@ -331,7 +330,6 @@ export default class LndAccount {
 
     // Websocket relationship established, now connect as peers on lightning
     if (peeringRequest) {
-      // parse out peer's peering information
       const { lndIdentityPubkey, lndPeeringHost } = JSON.parse(peeringRequest.data.toString())
       this.master._log.trace(`Peering request received from ${lndIdentityPubkey}`)
       return await this.peer(lndIdentityPubkey, lndPeeringHost)
