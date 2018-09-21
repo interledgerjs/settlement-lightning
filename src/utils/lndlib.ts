@@ -90,12 +90,12 @@ export default class LndLib {
   }
 
   async getInvoice(paymentRequest: string) : Promise < any > {
-    const pastPayments = await this.listInvoices()['invoices']
+    const pastPayments = await this.listInvoices()
     return pastPayments.find((obj: any) => obj.payment_request === paymentRequest)
   }
 
   async listInvoices() : Promise < any > {
-    return (await this._lndQuery('listInvoices', {}))['invoices']
+    return (await this._lndQuery('listInvoices', {})).invoices
   }
 
   /******************** Peering functions ***********************/
@@ -121,6 +121,24 @@ export default class LndLib {
 	/** retrieves a list of existing peers */
   async listPeers(): Promise < any[] > {
 		return (await this._lndQuery('listPeers', {})).peers
+  }
+
+  /********************* Channel maintenance ***************/
+
+  async hasAmount(amt: BigNumber) : Promise < boolean > {
+    return (await this.getMaxChannelBalance()) > amt
+  }
+
+  async getMaxChannelBalance() : Promise < any > {
+    const channels = await this.getChannels()
+    const maxChannel = Math.max(...(channels.map(c => c.local_balance)))
+    return maxChannel
+  }
+
+  async getChannels() : Promise < any[] > {
+    const channels = (await this._lndQuery('listChannels', {})).channels
+    const activeChannels = channels.filter((c:  any) => c.active)
+    return activeChannels
   }
 
 	/* TODO To be implemented later once we delve into the world

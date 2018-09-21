@@ -170,7 +170,7 @@ export default class LndAccount {
       if (await this.lnd.isPeer(lndIdentityPubkey)) {
         this.master._log.trace(`Successfully peered over lightning.`)
       } else {
-        throw new Error(`connectPeer failed to add peer!`)
+        throw new Error(`Failed to add peer with identity pubkey: ${lndIdentityPubkey}`)
       }
     }
   }
@@ -195,14 +195,19 @@ export default class LndAccount {
 
       const settlementAmount = this.master._balance.settleTo.minus(this.account.balance)
 
+      if (!this.lnd.hasAmount(settlementAmount)) {
+        return this.master._log.trace(`Cannot settle.  Insufficient ` + 
+          `funds in channel to complete settlement of ` + 
+          `${format(settlementAmount, Unit.Satoshi)}`)
+      }
+
       this.master._log.trace(`Attempting to settle with account ` + 
         `${this.account.accountName} for ${format(settlementAmount, Unit.Satoshi)}`)
 
       // Request an invoice from peer
       const paymentRequest = await this.requestInvoice(settlementAmount)
-      // TODO implement a check to ensure we have enough funds in channel
-      // conencted to lightning network to actually pay amount for invoice
-      const paymentPreimage = await this.lnd.payInvoice(paymentRequest)
+      // TODO this should be changed to paymentRequest
+      await this.lnd.payInvoice(paymentRequest)
 
       //TODO send transfer packet to peer confirming payment
       this.sendMessage({
@@ -214,7 +219,7 @@ export default class LndAccount {
             // TODO better name?
             protocolName: 'paidInvoice',
             contentType: BtpPacket.MIME_APPLICATION_JSON,
-            data: Buffer.from(JSON.stringify(paymentPreimage))
+            data: Buffer.from(JSON.stringify(paymentRequest))
           }]
         }
       }).catch(err => {
@@ -237,8 +242,7 @@ export default class LndAccount {
   /* Ask peer to generate invoice that you can fulfill */ 
   async requestInvoice(amt: BigNumber): Promise < string > {
     try {
-
-      // request an invoice paymentRequest from peer
+      // request a paymentRequest identifying an invoice from peer
       const response = await this.sendMessage({
         type: BtpPacket.TYPE_MESSAGE,
         requestId: await requestId(),
@@ -268,25 +272,28 @@ export default class LndAccount {
       }
     } catch (err) {
       this.master._log.trace(`Failed to request invoice: ${err.message}`)
+      return ''
     }
   }
 
   async validatePaymentRequest(paymentRequest: string, amt: BigNumber) : Promise < void > {
     const invoice = await this.lnd.decodePayReq(paymentRequest)
+    // TODO instead of validating, we can just specify amt (satoshis) and
+    // dest_string (identity pubkey) in sendPayment request to lnd
     this.validateInvoiceDestination(invoice)
     this.validateInvoiceAmount(invoice, amt)
   }
 
-  validateInvoiceDestination(invoice: any) : boolean {
-    if (!invoice.destination == this.account.lndIdentityPubkey) {
-      throw new Error(`Invoice destination: ${invoiceDestination} does not ` +
+  validateInvoiceDestination(invoice: any) : void {
+    if (!(invoice.destination == this.account.lndIdentityPubkey)) {
+      throw new Error(`Invoice destination: ${invoice.destination} does not ` +
         `match peer destination: ${this.master._lndIdentityPubkey}`)
     }
   }
 
-  validateInvoiceAmount(invoice: any, amt: BigNumber) : boolean {
-    if (!invoice.num_satoshis == amt) {
-      throw new Error(`Invoice amount: ${format(invoiceAmt, Unit.Satoshi)} ` +
+  validateInvoiceAmount(invoice: any, amt: BigNumber) : void {
+    if (!(invoice.num_satoshis == amt)) {
+      throw new Error(`Invoice amount: ${format(invoice.num_satoshis, Unit.Satoshi)} ` +
         `does not match requested amount: ${format(amt, Unit.Satoshi)}`)
     }
   }
