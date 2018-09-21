@@ -101,6 +101,7 @@ class LndPlugin extends EventEmitter2 implements LndPluginOpts {
   }
 
   async disconnect() {
+    await this._store.close()
     return this._plugin.disconnect()
   }
 
@@ -181,8 +182,6 @@ class LndClientPlugin extends BtpPlugin implements PluginInstance {
 
   async sendData(buffer: Buffer): Promise < Buffer > {
     const preparePacket = IlpPacket.deserializeIlpPacket(buffer)
-    this._account.beforeForward(preparePacket)
-
     const response = await this._call('', {
       type: BtpPacket.TYPE_MESSAGE,
       requestId: await requestId(),
@@ -194,13 +193,13 @@ class LndClientPlugin extends BtpPlugin implements PluginInstance {
         }]
       }
     })
-
     const ilpResponse = response.protocolData.filter((p: any) => p.protocolName === 'ilp')[0]
-    const responsePacket = IlpPacket.deserializeIlpPacket(ilpResponse.data)
-
-    await this._account.afterForwardResponse(preparePacket, responsePacket)
-
-    return ilpResponse ? ilpResponse.data : Buffer.alloc(0)
+    if (ilpResponse) {
+      const responsePacket = IlpPacket.deserializeIlpPacket(ilpResponse.data)
+      this._account.handlePrepareResponse(preparePacket, responsePacket)
+      return ilpResponse.data
+    }
+    return Buffer.alloc(0)
   }
 
   _disconnect(): Promise < void > {
@@ -267,7 +266,7 @@ class LndServerPlugin extends MiniAccountsPlugin implements PluginInstance {
       responsePacket: IlpPacket.IlpPacket,
       preparePacket: IlpPacket.IlpPacket
     ): Promise < void > =>
-    this._getAccount(destination).afterForwardResponse(preparePacket, responsePacket)
+    this._getAccount(destination).handlePrepareResponse(preparePacket, responsePacket)
 
   _close(from: string): Promise < void > {
     return this._getAccount(from).disconnect()

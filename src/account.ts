@@ -325,15 +325,19 @@ export default class LndAccount {
   }
 
   handlePrepareResponse (preparePacket: IlpPacket.IlpPacket, responsePacket: IlpPacket.IlpPacket) : void {
-    if (responsePacket.type !== IlpPacket.Type.TYPE_ILP_FULFILL) return
-    this.master._log.trace('Received FULFILL in response to forwarded PREPARE')
-    let amount = new BigNumber(preparePacket.data.amount)
-    try {
-      this.subBalance(amount)
-      this.attemptSettle()
-    } catch (err) {
-      throw new IlpPacket.Errors.InsufficientLiquidityError(err.message)
+    const isFulfill = responsePacket.type === IlpPacket.Type.TYPE_ILP_FULFILL
+    const isReject = responsePacket.type === IlpPacket.Type.TYPE_ILP_REJECT
+    if (isFulfill) {
+      this.master._log.trace(`Received FULFILL in response to forwarded PREPARE`)
+      const amount = new BigNumber(preparePacket.data.amount)
+      try {
+        this.subBalance(amount)
+      } catch (err) {
+        this.master._log.trace(`Failed to fulfill response from PREPARE: ${err.message}`)
+        throw new IlpPacket.Errors.InternalError(err.message)
+      }
     }
+    if (isFulfill || (isReject && responsePacket.data.code === 'T04')) this.attemptSettle()
   }
 
   /************************** BTP packet handlers ****************************/
@@ -387,11 +391,12 @@ export default class LndAccount {
     }
   }
 
-  beforeForward(preparePacket: IlpPacket.IlpPacket): void {}
-
-  async afterForwardResponse(preparePacket: IlpPacket.IlpPacket, responsePacket: IlpPacket.IlpPacket): Promise < void > {}
-
-  async disconnect() {}
+  async disconnect() {
+    if (this.master._role === 'client') {
+      await this.attemptSettle()
+    }
+    return this.master._store.unload(`${this.account.accountName}:account`)
+  }
 
   /*********** Balance adjustment logging and error checking ************/
 
