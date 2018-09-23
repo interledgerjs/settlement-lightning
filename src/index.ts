@@ -1,19 +1,18 @@
 import BigNumber from 'bignumber.js'
 import { EventEmitter2 } from 'eventemitter2'
-import { DataHandler, MoneyHandler } from './utils/types'
-import { Logger, PluginInstance } from './types'
+import { DataHandler, MoneyHandler, PluginInstance, Logger } from './utils/types'
 import createLogger = require('ilp-logger')
 import * as debug from 'debug'
 import * as IlpPacket from 'ilp-packet'
+const BtpPacket = require('btp-packet')
 import BtpPlugin, { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
 import MiniAccountsPlugin from 'ilp-plugin-mini-accounts'
 import LndAccount, { requestId, convert, Unit } from './account'
-const BtpPacket = require('btp-packet')
 import StoreWrapper from './utils/store-wrapper'
 
 interface LndPluginOpts {
-  _role: 'client' | 'server'
-  _balance ? : {
+  role: 'client' | 'server'
+  balance ? : {
     minimum ? : BigNumber.Value
     maximum ? : BigNumber.Value
     settleTo ? : BigNumber.Value
@@ -21,12 +20,10 @@ interface LndPluginOpts {
   }
   _store ? : any
   _log ? : Logger
-  /* We are working exclusively with lightning identity
-   * public keys currently.  Further updates will add in functionality
-   * for direct BTC public keys */
-  _lndIdentityPubkey: string
-  /* 'host:port' that is listening for P2P lightning connections */
-  _lndPeeringHost: string
+  // This version only implements Lightning, not BTC directly
+  lndIdentityPubkey: string
+  // 'host:port' that is listening for P2P lightning connections
+  lndPeeringHost: string
   // max satoshis permitted in each packet
   maxPacketAmount?: BigNumber.Value
 }
@@ -35,9 +32,16 @@ interface LndPluginOpts {
  * is largely used to maintain necessary state while passing the 
  * functionality off to the client and server implementations to
  * handle */
-class LndPlugin extends EventEmitter2 implements LndPluginOpts {
-  
-  // denominated in Satoshis
+class LndPlugin extends EventEmitter2 implements PluginInstance {
+
+  readonly _store: any
+  readonly _log: Logger
+  readonly _maxPacketAmount: BigNumber
+  readonly _lndIdentityPubkey: string
+  readonly _lndPeeringHost: string
+	readonly _role: 'client' | 'server'
+  private readonly _plugin: LndServerPlugin | LndClientPlugin
+  _channels: Map<string, string> // ChannelId -> accountName
   readonly _balance: {
     minimum: BigNumber
     maximum: BigNumber
@@ -45,36 +49,32 @@ class LndPlugin extends EventEmitter2 implements LndPluginOpts {
     settleThreshold ? : BigNumber
   }
 
-  readonly _store: any
-  readonly _log: Logger
-  readonly _lndIdentityPubkey: string
-  readonly _lndPeeringHost: string
-  // TODO implement peer as _role
-  // FIXME Should this be private?
-	readonly _role: 'client' | 'server'
-  private readonly _plugin: LndServerPlugin | LndClientPlugin
-  _channels: Map<string, string> // ChannelId -> accountName
-  readonly _maxPacketAmount: BigNumber
-
-  constructor(opts: LndPluginOpts) {
+  constructor({
+    role = 'client',
+    lndIdentityPubkey,
+    lndPeeringHost,
+    maxPacketAmount = Infinity,
+    balance: {
+      minimum = -Infinity,
+      maximum = Infinity,
+      settleTo = 0,
+      settleThreshold = undefined
+    } = {}, ...opts 
+  }: LndPluginOpts) {
     super()
+    if (typeof lndIdentityPubkey !== 'string') throw new Error(`Lightning identity pubkey required`)
+    if (typeof lndPeeringHost !== 'string') throw new Error(`Lightning peering host required`)
 
-    this._maxPacketAmount = new BigNumber(opts.maxPacketAmount || Infinity)
-      .abs().dp(0, BigNumber.ROUND_DOWN)
-
-    this._balance = {
-      minimum: new BigNumber((opts._balance && opts._balance.minimum) || Infinity)
-        .dp(0, BigNumber.ROUND_FLOOR),
-      maximum: new BigNumber((opts._balance && opts._balance.maximum) || Infinity)
-        .dp(0, BigNumber.ROUND_FLOOR),
-      settleTo: new BigNumber((opts._balance && opts._balance.settleTo) || Infinity)
-        .dp(0, BigNumber.ROUND_FLOOR),
-      settleThreshold: new BigNumber((opts._balance && opts._balance.settleThreshold) || Infinity)
-        .dp(0, BigNumber.ROUND_FLOOR)
-    }
-
-    // default to client 
-    this._role = opts._role || 'client'
+    this._role = role
+    this._store = new StoreWrapper(opts._store)
+		this._channels = new Map()
+    this._maxPacketAmount = new BigNumber(maxPacketAmount).abs().dp(0, BigNumber.ROUND_DOWN)
+    // logging tools
+    this._log = opts._log || createLogger(`ilp-plugin-lnd-${this._role}`)
+    this._log.trace = this._log.trace || debug(`ilp-plugin-lnd-${this._role}:trace`)
+    // lightning peering credentials
+    this._lndIdentityPubkey = lndIdentityPubkey
+    this._lndPeeringHost = lndPeeringHost
 
     // create server or client plugin
     const InternalPlugin = this._role === 'client' ? LndClientPlugin : LndServerPlugin
@@ -83,17 +83,32 @@ class LndPlugin extends EventEmitter2 implements LndPluginOpts {
 			master: this
     })
 
-    // Used for communication over lightning
-    this._lndIdentityPubkey = opts._lndIdentityPubkey
-    this._lndPeeringHost = opts._lndPeeringHost
-
-    // logging tools
-    this._log = opts._log || createLogger(`ilp-plugin-lnd-${this._role}`)
-    this._log.trace = this._log.trace || debug(`ilp-plugin-lnd-${this._role}:trace`)
-
-		this._channels = new Map()
-
-    this._store = new StoreWrapper(opts._store)
+    this._balance = {
+      minimum: new BigNumber(minimum).dp(0, BigNumber.ROUND_FLOOR),
+      maximum: new BigNumber(maximum).dp(0, BigNumber.ROUND_FLOOR),
+      settleTo: new BigNumber(settleTo).dp(0, BigNumber.ROUND_FLOOR),
+      settleThreshold: settleThreshold ? 
+        new BigNumber(settleThreshold).dp(0, BigNumber.ROUND_FLOOR) : undefined
+    }
+    if (this._balance.settleThreshold) {
+      if (!this._balance.maximum.gte(this._balance.settleTo)) {
+        throw new Error('Invalid balance configuration: maximum balance must be greater than or equal to settleTo')
+      }
+      if (!this._balance.settleTo.gte(this._balance.settleThreshold)) {
+        throw new Error('Invalid balance configuration: settleTo mustbe greater than or equal to settleThreshold')
+      }
+      if (!this._balance.settleThreshold.gte(this._balance.minimum)) {
+        throw new Error('Invalid balance configuration: must be greater than or equal to minimum balance')
+      }
+    } else {
+      if (!this._balance.maximum.gt(this._balance.minimum)) {
+        throw new Error('Invalid balance configuration: maximum balance must be greater than or equal to minimum balance')
+      }
+    }
+      
+    this._plugin.on('connect', () => this.emitAsync('connect'))
+    this._plugin.on('disconnect', () => this.emitAsync('disconnect'))
+    this._plugin.on('error', e => this.emitAsync('error', e))
   }
 
   async connect() {
@@ -239,13 +254,6 @@ class LndServerPlugin extends MiniAccountsPlugin implements PluginInstance {
     return account
   }
 
-  /** In Mini-Accounts _connect is called once the server receives an
-   * incoming websocket connection.  It then verifies auth and calls
-   * _connect with the intent for it to be overwritten at the plugin 
-   * level where it passes along the IlpAddress that is needed for%
-   * address: IlpAddress
-   * message: authPacket that mini-accounts passes to this function,
-   * but I don't believe we need to use it here */
   _connect(address: string, message: BtpPacket): Promise < void > {
     return this._getAccount(address).connect()
   }
@@ -255,10 +263,6 @@ class LndServerPlugin extends MiniAccountsPlugin implements PluginInstance {
 
   _handleMoney(from: string, message: BtpPacket): Promise < BtpSubProtocol[] > {
     return this._getAccount(from).handleMoney(message, this._moneyHandler)
-  }
-
-  _sendPrepare(destination: string, preparePacket: IlpPacket.IlpPacket) {
-    // Currently causing an error when Stream sends ILDCP request 
   }
 
   _handlePrepareResponse = async(
