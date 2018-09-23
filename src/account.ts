@@ -129,20 +129,34 @@ export default class LndAccount {
   /** LND peering relationships are bidirectional, so no
   * need to send back server's identity pubkey */
   async handlePeeringRequest(lndIdentityPubkey: string, lndPeeringHost: string) : Promise < BtpSubProtocol[] > {
-    await this.lnd.connectPeer(lndIdentityPubkey, lndPeeringHost)
-    // ensure peering success
-    if (await this.lnd.isPeer(lndIdentityPubkey)) {
-      this.master._log.trace(`Successfully peered with: ${lndIdentityPubkey}`)
-      // respond with identity pubkey so client can save in account
-      return [{
-        protocolName: 'peeringResponse',
-        contentType: BtpPacket.MIME_APPLICATION_JSON,
-        data: Buffer.from(JSON.stringify({
-          lndIdentityPubkey: this.master._lndIdentityPubkey
-        }))
-      }]
-    } else {
-      throw new Error(`Failed to add peer with identity pubkey: ${lndIdentityPubkey}`)
+    try {
+      const peers = await this.lnd.listPeers()
+      const alreadyPeered = peers.find((peer: any) => peer.pub_key === lndIdentityPubkey)
+      if (alreadyPeered) {
+        this.master._log.trace(`Already lightning peers with: ${lndIdentityPubkey}`)
+        return [{
+          protocolName: 'peeringResponse',
+          contentType: BtpPacket.MIME_APPLICATION_JSON,
+          data: Buffer.from(JSON.stringify({
+            lndIdentityPubkey: this.master._lndIdentityPubkey
+          }))
+        }]
+        // if not peered, connect over lightning
+      } else {
+        this.master._log.trace(`Attempting to connect with peer: ${lndIdentityPubkey}`)
+        await this.lnd.connectPeer(lndIdentityPubkey, lndPeeringHost)
+        this.master._log.trace(`Successfully peered with: ${lndIdentityPubkey}`)
+        return [{
+          protocolName: 'peeringResponse',
+          contentType: BtpPacket.MIME_APPLICATION_JSON,
+          data: Buffer.from(JSON.stringify({
+            lndIdentityPubkey: this.master._lndIdentityPubkey
+          }))
+        }]
+      } 
+      
+    } catch (err) {
+      throw new Error(`Failed to add peer: ${err.message}`)
     }
   }
 
