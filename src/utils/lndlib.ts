@@ -13,9 +13,15 @@ export default class LndLib {
 
   private lightning: any
   private connected: boolean
-  constructor() {
+  private readonly tlsCertPath: string
+  private readonly macaroonPath: string
+  private readonly lndHost: string
+  constructor(opts: any) {
     // First request connects to lnd
     this.connected = false
+    this.tlsCertPath = opts.tlsCertPath
+    this.macaroonPath = opts.macaroonPath
+    this.lndHost = opts.lndHost
   }
 
   /******************* Personal information queries *****************/
@@ -216,20 +222,18 @@ export default class LndLib {
    * at the beginning of every request we make to _lndQuery
    */
   async connect() {
-    // Default lnd host and port
-    const lndHost: string = 'localhost:10006'
     // get ssl certificate
     const lndCert = await this._getTlsCert()
     // macaroon credentials
     const macaroonCreds = await this._getMacaroonCreds()
     // combine credentials for lnrpc
-    const tlsCrds = grpc.credentials.createSsl(lndCert)
-    const combinedCredentials = grpc.credentials.combineChannelCredentials(tlsCrds, macaroonCreds)
+    const tlsCreds = grpc.credentials.createSsl(lndCert)
+    const combinedCredentials = grpc.credentials.combineChannelCredentials(tlsCreds, macaroonCreds)
 		// create lightning instance
 		// TODO make this path so that typescript compiles it at all times
 		const protoPath: string = './utils/rpc.proto'
 		const lnrpc = await this._loadDescriptor(protoPath)
-    this.lightning = new lnrpc.Lightning(lndHost, combinedCredentials)
+    this.lightning = new lnrpc.Lightning(this.lndHost, combinedCredentials)
     this.connected = true
   }
 
@@ -248,13 +252,13 @@ export default class LndLib {
   async _getTlsCert(): Promise < string > {
     /* Retrieve default path of tls.cert for lnd according
 		 * to operating system of the user */
-		const certPath: string = (function (operatingSystem) {
+    const certPath: string = this.tlsCertPath || (function (operatingSystem) {
       switch (operatingSystem) {
         case 'darwin':
           return `${process.env.HOME}/Library/Application Support/Lnd/tls.cert`
         case 'linux':
           return `${process.env.HOME}/.lnd/tls.cert`
-          // TODO unsure of path for windows, giving it same path as linux currently
+          // TODO unsure of path for windows, giving it same path as linux
         case 'win32':
           return `${process.env.HOME}/.lnd/tls.cert`
         default:
@@ -275,7 +279,7 @@ export default class LndLib {
 	 */
   // TODO change return type to macaroon meta
   async _getMacaroonCreds(): Promise < any > {
-    let macaroonPath: string = (function (operatingSystem) {
+    const macaroonPath: string = this.macaroonPath || (function (operatingSystem) {
       switch (operatingSystem) {
         case 'darwin':
           return `${process.env.HOME}/Library/Application Support/Lnd/admin.macaroon`
@@ -289,9 +293,6 @@ export default class LndLib {
       }
     })(process.platform)
 
-		// FIXME hardcoding my dee node's path currently just for debugging
-    macaroonPath = '/Users/austinking/gocode/dev/ernie/data/chain/bitcoin/simnet/admin.macaroon'
-
 		/* Use path to query file and actually create the gRPC credentials object */
 		try {
 			let macaroon = fs.readFileSync(macaroonPath).toString('hex');
@@ -301,9 +302,8 @@ export default class LndLib {
 				  callback(null, metadata);
 			});
 			return macaroonCreds
-		} catch (e) {
-			console.log(e)
-      throw new Error('admin.macaroon does not exist in default location for this OS')
+		} catch (err) {
+      throw new Error(`admin.macaroon does not exist in default location for this OS: ${err.message}`)
     }
   }
 }

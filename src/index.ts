@@ -9,6 +9,7 @@ import BtpPlugin, { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
 import MiniAccountsPlugin from 'ilp-plugin-mini-accounts'
 import LndAccount, { requestId, convert, Unit } from './account'
 import StoreWrapper from './utils/store-wrapper'
+import LndLib from './utils/lndlib'
 
 interface LndPluginOpts {
   role: 'client' | 'server'
@@ -26,6 +27,7 @@ interface LndPluginOpts {
   lndPeeringHost: string
   // max satoshis permitted in each packet
   maxPacketAmount?: BigNumber.Value
+  lnd: LndLib
 }
 
 /* Master class that creates a sub-plugin using _role.  This
@@ -41,6 +43,7 @@ class LndPlugin extends EventEmitter2 implements PluginInstance {
   readonly _lndPeeringHost: string
 	readonly _role: 'client' | 'server'
   private readonly _plugin: LndServerPlugin | LndClientPlugin
+  readonly lnd: LndLib
   _channels: Map<string, string> // ChannelId -> accountName
   readonly _balance: {
     minimum: BigNumber
@@ -75,6 +78,9 @@ class LndPlugin extends EventEmitter2 implements PluginInstance {
     // lightning peering credentials
     this._lndIdentityPubkey = lndIdentityPubkey
     this._lndPeeringHost = lndPeeringHost
+    this.lnd = new LndLib({
+      ...opts
+    })
 
     // create server or client plugin
     const InternalPlugin = this._role === 'client' ? LndClientPlugin : LndServerPlugin

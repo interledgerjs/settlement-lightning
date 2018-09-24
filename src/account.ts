@@ -6,7 +6,6 @@ import { DataHandler, MoneyHandler } from './utils/types'
 import { promisify } from 'util'
 import { randomBytes } from 'crypto'
 import { BtpPacket, BtpPacketData, BtpSubProtocol } from 'ilp-plugin-btp'
-import LndLib from './utils/lndlib'
 import { ilpAndCustomToProtocolData } from 'ilp-plugin-btp/src/protocol-data-converter'
 
 // Used to denominate which assetScale we are using
@@ -38,15 +37,13 @@ export default class LndAccount {
   private master: LndPlugin
   // method in which BTP packets will be sent
   private sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
-  // All lightning logic is performed using LndLib
-  private lnd: LndLib
+
   constructor(opts: {
     accountName: string,
     master: LndPlugin,
     sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
   }) {
     this.master = opts.master
-    this.lnd = new LndLib()
     this.sendMessage = opts.sendMessage
     this.account = {
       accountName: opts.accountName,
@@ -63,7 +60,7 @@ export default class LndAccount {
     const accountKey = `${this.account.accountName}:account`
     await this.master._store.loadObject(accountKey)
     const savedAccount = this.master._store.getObject(accountKey) || {}
-    // If properties exist, convert to BigNumbers
+    // If account exist, convert balance to BigNumber
     if (typeof savedAccount.balance === 'string') {
       savedAccount.balance = new BigNumber(savedAccount.balance)
     }
@@ -93,7 +90,7 @@ export default class LndAccount {
   /* Send personal identity pubkey to server*/
   async sendPeeringInfo(): Promise < void > {
     if (this.account.lndIdentityPubkey) {
-      if (this.lnd.isPeer(this.account.lndIdentityPubkey)) {
+      if (this.master.lnd.isPeer(this.account.lndIdentityPubkey)) {
         this.master._log.trace(`Already peered with : ${this.account.lndIdentityPubkey}`)
         return
       }
@@ -116,7 +113,7 @@ export default class LndAccount {
     const subProtocol = response.protocolData.find((p: BtpSubProtocol) => p.protocolName === 'peeringResponse')
     if (subProtocol) {
       const { lndIdentityPubkey } = JSON.parse(subProtocol.data.toString())
-      if (!this.lnd.isPeer(lndIdentityPubkey)) {
+      if (!this.master.lnd.isPeer(lndIdentityPubkey)) {
         throw new Error(`Received peeringResponse without existing peer relationship over lightning`)
       }
       this.account.lndIdentityPubkey = lndIdentityPubkey
@@ -130,7 +127,7 @@ export default class LndAccount {
   * need to send back server's identity pubkey */
   async handlePeeringRequest(lndIdentityPubkey: string, lndPeeringHost: string) : Promise < BtpSubProtocol[] > {
     try {
-      const peers = await this.lnd.listPeers()
+      const peers = await this.master.lnd.listPeers()
       const alreadyPeered = peers.find((peer: any) => peer.pub_key === lndIdentityPubkey)
       if (alreadyPeered) {
         this.master._log.trace(`Already lightning peers with: ${lndIdentityPubkey}`)
@@ -144,7 +141,7 @@ export default class LndAccount {
         // if not peered, connect over lightning
       } else {
         this.master._log.trace(`Attempting to connect with peer: ${lndIdentityPubkey}`)
-        await this.lnd.connectPeer(lndIdentityPubkey, lndPeeringHost)
+        await this.master.lnd.connectPeer(lndIdentityPubkey, lndPeeringHost)
         this.master._log.trace(`Successfully peered with: ${lndIdentityPubkey}`)
         return [{
           protocolName: 'peeringResponse',
@@ -177,7 +174,7 @@ export default class LndAccount {
           `settleThreshold of ${format(settleThreshold, Unit.Satoshi)}`)
       }
       const settlementAmount = this.master._balance.settleTo.minus(this.account.balance)
-      if (!this.lnd.hasAmount(settlementAmount)) {
+      if (!this.master.lnd.hasAmount(settlementAmount)) {
         return this.master._log.trace(`Cannot settle.  Insufficient ` + 
           `funds in channel to complete settlement of ` + 
           `${format(settlementAmount, Unit.Satoshi)}`)
@@ -186,7 +183,7 @@ export default class LndAccount {
         `${this.account.accountName} for ${format(settlementAmount, Unit.Satoshi)}`)
       // Request invoice, pay invoice
       const paymentRequest = await this.requestInvoice(settlementAmount)
-      await this.lnd.payInvoice(paymentRequest)
+      await this.master.lnd.payInvoice(paymentRequest)
       // Send notification of payment
       this.sendMessage({
         type: BtpPacket.TYPE_TRANSFER,
@@ -248,7 +245,7 @@ export default class LndAccount {
   }
 
   async validatePaymentRequest(paymentRequest: string, amt: BigNumber) : Promise < void > {
-    const invoice = await this.lnd.decodePayReq(paymentRequest)
+    const invoice = await this.master.lnd.decodePayReq(paymentRequest)
     // TODO instead of validating, we can just specify amt (satoshis) and
     // dest_string (identity pubkey) in sendPayment request to lnd
     this.validateInvoiceDestination(invoice)
@@ -271,9 +268,9 @@ export default class LndAccount {
 
   // generate invoice and send back to peer
   async handleInvoiceRequest(amt: number) : Promise < BtpSubProtocol[] > {
-    this.master._log.trace(`Received request for invoice of size: ${amt}`)
+    this.master._log.trace(`Received request for invoice of size: ${format(amt, Unit.Satoshi)}`)
     // Retrieve new invoice from lnd client
-    const invoice = await this.lnd.addInvoice(amt)
+    const invoice = await this.master.lnd.addInvoice(amt)
     const paymentRequest = invoice['payment_request']
     this.master._log.trace(`Responding with paymentRequest: ${paymentRequest}`)
     return [{
@@ -364,7 +361,7 @@ export default class LndAccount {
     // Upon new WS connection, client sends lightning peering info to server
     if (peeringRequest) {
       const { lndIdentityPubkey, lndPeeringHost } = JSON.parse(peeringRequest.data.toString())
-      this.master._log.trace(`Peering request received from ${lndIdentityPubkey}`)
+      this.master._log.trace(`Peering request received from: ${lndIdentityPubkey}`)
       return await this.handlePeeringRequest(lndIdentityPubkey, lndPeeringHost)
     }
     // Generate invoice and send paymentRequest back to peer
@@ -389,9 +386,9 @@ export default class LndAccount {
         this.master._log.trace(`Handling paid invoice for account ${this.account.accountName}`)
         // check validity through matching sent preimage to fulfilled invoice
         const paymentRequest = JSON.parse(invoiceFulfill.data.toString())
-        const invoice = await this.lnd.getInvoice(paymentRequest)
-        if (this.lnd.isFulfilledInvoice(invoice)) {
-          this.subBalance(this.lnd.invoiceAmount(invoice))
+        const invoice = await this.master.lnd.getInvoice(paymentRequest)
+        if (this.master.lnd.isFulfilledInvoice(invoice)) {
+          this.subBalance(this.master.lnd.invoiceAmount(invoice))
           this.master._log.trace(`Updated balance after settlement with ${this.account.accountName}`)
         } else {
           this.master._log.trace('Payment request does not correspond to a settled invoice') 
