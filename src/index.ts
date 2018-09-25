@@ -56,7 +56,6 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     settleThreshold?: BigNumber
   }
   private readonly _plugin: LightningServerPlugin | LightningClientPlugin
-  private _channels: Map<string, string> // ChannelId -> accountName
 
   constructor({
     role = 'client',
@@ -81,7 +80,6 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
 
     this._role = role
     this._store = new StoreWrapper(opts._store)
-    this._channels = new Map()
     this._maxPacketAmount = new BigNumber(maxPacketAmount).abs()
       .dp(0, BigNumber.ROUND_DOWN)
     // logging tools

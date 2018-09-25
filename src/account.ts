@@ -230,7 +230,8 @@ export default class LightningAccount {
   }
 
   public _validateInvoiceAmount(invoice: any, amt: BigNumber): void {
-    if (!(invoice.num_satoshis === amt)) {
+    const invoiceAmt = new BigNumber(invoice.num_satoshis)
+    if (!(invoiceAmt.isEqualTo(amt))) {
       throw new Error(`Invoice amount: ` +
         `${format(invoice.num_satoshis, Unit.Satoshi)} ` +
         `does not match requested amount: ${format(amt, Unit.Satoshi)}`)

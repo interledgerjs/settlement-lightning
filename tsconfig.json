@@ -16,8 +16,8 @@
     "project": "."
   },
   "includes": [
-    "src/**/*",
-		"src/**/*.proto"
+    "test/**/*",
+    "src/**/*"
   ],
 	"exclude": [
 		"build" 

@@ -5,6 +5,7 @@ const path = require('path')
 const protoLoader = require('@grpc/proto-loader')
 const promisify = require('util').promisify
 import BigNumber from 'bignumber.js'
+
 process.env.GRPC_SSL_CIPHER_SUITES = 'HIGH+ECDSA'
 
 const sleep = require('util').promisify(setTimeout)
@@ -16,12 +17,15 @@ export default class LndLib {
   private readonly tlsCertPath: string
   private readonly macaroonPath: string
   private readonly lndHost: string
+  private readonly protoPath: string
   constructor(opts: any) {
-    // First request connects to lnd
+    // First lnd query connects to lnd
     this.connected = false
     this.tlsCertPath = opts.tlsCertPath
     this.macaroonPath = opts.macaroonPath
     this.lndHost = opts.lndHost
+    //this.protoPath = path.join(__dirname, '../src/utils/rpc.proto')
+    this.protoPath = './src/utils/rpc.proto'
   }
 
   public async addInvoice(amt: number): Promise < any  > {
@@ -94,8 +98,7 @@ export default class LndLib {
     const combinedCredentials =
       grpc.credentials.combineChannelCredentials(tlsCreds, macaroonCreds)
     // create lightning instance
-    const protoPath: string = './utils/rpc.proto'
-    const lnrpc = await this._loadDescriptor(protoPath)
+    const lnrpc = await this._loadDescriptor(this.protoPath)
     this.lightning = new lnrpc.Lightning(this.lndHost, combinedCredentials)
     this.connected = true
   }
@@ -116,6 +119,7 @@ export default class LndLib {
           resolve(response)
         })
       })
+      return result
     } catch (e) {
       throw e
     }
