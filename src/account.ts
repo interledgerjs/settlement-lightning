@@ -167,7 +167,7 @@ export default class LightningAccount {
           }]
         }
       }).catch((err) => {
-        this.master._log.error(`Error while sending payment preimage in ` +
+        this.master._log.error(`Error while sending payment request in ` +
           `response to invoice with paymentRequest: ${paymentRequest}, ` +
           `balance between accounts will be imbalanced`)
       })
@@ -210,31 +210,6 @@ export default class LightningAccount {
     } catch (err) {
       this.master._log.trace(`Failed to request invoice: ${err.message}`)
       return ''
-    }
-  }
-
-  public async _validatePaymentRequest(
-    paymentRequest: string,
-    amt: BigNumber):
-  Promise < void > {
-    const invoice = await this.master.lnd.decodePayReq(paymentRequest)
-    this._validateInvoiceDestination(invoice)
-    this._validateInvoiceAmount(invoice, amt)
-  }
-
-  public _validateInvoiceDestination(invoice: any): void {
-    if (!(invoice.destination === this.account.lndIdentityPubkey)) {
-      throw new Error(`Invoice destination: ${invoice.destination} does not ` +
-        `match peer destination: ${this.master._lndIdentityPubkey}`)
-    }
-  }
-
-  public _validateInvoiceAmount(invoice: any, amt: BigNumber): void {
-    const invoiceAmt = new BigNumber(invoice.num_satoshis)
-    if (!(invoiceAmt.isEqualTo(amt))) {
-      throw new Error(`Invoice amount: ` +
-        `${format(invoice.num_satoshis, Unit.Satoshi)} ` +
-        `does not match requested amount: ${format(amt, Unit.Satoshi)}`)
     }
   }
 
@@ -371,10 +346,10 @@ export default class LightningAccount {
         dataHandler(ilp.data)
       ])
       clearTimeout(timer!)
-      // If packet is rejected or times out, revert balance
       if (response[0] === IlpPacket.Type.TYPE_ILP_FULFILL) {
         this.master._log.trace(`Received FULFILL from data handler in ` +
           `response to forwarded PREPARE`)
+      // If packet is rejected or times out, revert balance
       } else {
         this._subBalance(amount)
       }
@@ -421,6 +396,31 @@ export default class LightningAccount {
       }
     } catch (err) {
       throw new Error(`Failed to add peer: ${err.message}`)
+    }
+  }
+
+  private async _validatePaymentRequest(
+    paymentRequest: string,
+    amt: BigNumber):
+  Promise < void > {
+    const invoice = await this.master.lnd.decodePayReq(paymentRequest)
+    this._validateInvoiceDestination(invoice)
+    this._validateInvoiceAmount(invoice, amt)
+  }
+
+  private _validateInvoiceDestination(invoice: any): void {
+    if (!(invoice.destination === this.account.lndIdentityPubkey)) {
+      throw new Error(`Invoice destination: ${invoice.destination} does not ` +
+        `match peer destination: ${this.master._lndIdentityPubkey}`)
+    }
+  }
+
+  private _validateInvoiceAmount(invoice: any, amt: BigNumber): void {
+    const invoiceAmt = new BigNumber(invoice.num_satoshis)
+    if (!(invoiceAmt.isEqualTo(amt))) {
+      throw new Error(`Invoice amount: ` +
+        `${format(invoice.num_satoshis, Unit.Satoshi)} ` +
+        `does not match requested amount: ${format(amt, Unit.Satoshi)}`)
     }
   }
 

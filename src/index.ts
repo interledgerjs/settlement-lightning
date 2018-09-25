@@ -124,7 +124,7 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     } else {
       if (!this._balance.maximum.gt(this._balance.minimum)) {
         throw new Error(`Invalid balance configuration: ` +
-          `maximum balance must be greater than or equal to minimum balance`)
+          `maximum balance must be greater than minimum balance`)
       }
     }
 

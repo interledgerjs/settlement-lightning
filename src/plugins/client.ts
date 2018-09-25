@@ -17,7 +17,7 @@ extends BtpPlugin implements PluginInstance {
     super(opts)
     this._account = new LightningAccount({
       master: opts.master,
-      // server is single counterparty
+      // server is only counterparty
       accountName: 'server',
       sendMessage: (message: BtpPacket) => this._call('', message)
     })
