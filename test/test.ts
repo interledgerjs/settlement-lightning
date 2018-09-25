@@ -1,23 +1,23 @@
-process.env.DEBUG='*'
+process.env.DEBUG = '*'
 
 import LightningLib from '../src/utils/lightning-lib'
-const LightningPlugin = require('../src/index')
+const lightningPlugin = require('../src/index')
 import BigNumber from 'bignumber.js'
 
 const port = 3000
 
-const serverIdentityPubkey = '033c68de7511aa769eb45c3b03cffb5c231a847f300d67de7107c9808dff7696ec'
-const serverMacaroonPath = '/Users/austinking/gocode/dev/ernie/data/chain/bitcoin/simnet/admin.macaroon'
-const serverPeeringHost = 'localhost:10016'
-const serverLndHost = 'localhost:10006'
+const serverIdentityPubkey = ''
+const serverMacaroonPath = ''
+const serverPeeringHost = ''
+const serverLndHost = ''
 
-const clientIdentityPubkey = '035f98891a132aa23f340fa2ae372be86ea1c46a2a8933321da4a42684e167fea4'
-const clientMacaroonPath = '/Users/austinking/gocode/dev/dee/data/chain/bitcoin/simnet/admin.macaroon'
-const clientPeeringHost = 'localhost:10015'
-const clientLndHost = 'localhost:10005'
+const clientIdentityPubkey = ''
+const clientMacaroonPath = ''
+const clientPeeringHost = ''
+const clientLndHost = ''
 
 async function createServer() {
-  const plugin = new LightningPlugin({
+  const plugin = new lightningPlugin({
     role: 'server',
     maxPacketAmount: 100,
     port,
@@ -35,7 +35,7 @@ async function createServer() {
 }
 
 async function createClient() {
-  const plugin = new LightningPlugin({
+  const plugin = new lightningPlugin({
     role: 'client',
     server: `btp+ws://:secret@localhost:${port}`,
     lndIdentityPubkey: clientIdentityPubkey,
@@ -52,7 +52,8 @@ async function run() {
   const client = await createClient()
   await client.connect()
   const invoiceAmount = new BigNumber(99)
-  const paymentRequest = await client._plugin._account.requestInvoice(invoiceAmount)
+  const paymentRequest =
+    await client._plugin._account.requestInvoice(invoiceAmount)
   console.log(`Invoice payment request: ${paymentRequest}`)
 }
 

@@ -24,7 +24,6 @@ export default class LndLib {
     this.tlsCertPath = opts.tlsCertPath
     this.macaroonPath = opts.macaroonPath
     this.lndHost = opts.lndHost
-    //this.protoPath = path.join(__dirname, '../src/utils/rpc.proto')
     this.protoPath = './src/utils/rpc.proto'
   }
 
