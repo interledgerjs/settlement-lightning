@@ -97,15 +97,6 @@ export default class LightningAccount {
   }
 
   public async sendPeeringInfo(): Promise < void > {
-    // if already peered over lightning
-    if (this.account.lndIdentityPubkey) {
-      if (this.master.lnd.isPeer(this.account.lndIdentityPubkey)) {
-        this.master._log.trace(`Already peered with : ` +
-          `${this.account.lndIdentityPubkey}`)
-        return
-      }
-    }
-    // if not already peered, share peering host and identity pubkey
     const response = await this.sendMessage({
       type: btpPacket.TYPE_MESSAGE,
       requestId: await requestId(),
