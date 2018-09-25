@@ -1,5 +1,5 @@
 {
-  "name": "new",
+  "name": "ilp-plugin-lnd-asym-server",
   "version": "0.1.0",
   "description": "",
   "main": "build/index.js",
@@ -22,8 +22,8 @@
     "eventemitter2": "^5.0.1",
     "grpc": "^1.14.2",
     "ilp-logger": "^1.0.2",
-    "ilp-plugin-btp": "github:kincaidoneil/ilp-plugin-btp",
-    "ilp-plugin-mini-accounts": "github:kincaidoneil/ilp-plugin-mini-accounts",
+    "ilp-plugin-btp": "^1.3.2",
+    "ilp-plugin-mini-accounts": "github:interledgerjs/ilp-plugin-mini-accounts#ko-ts-fixes",
     "typescript": "^3.0.3"
   },
   "devDependencies": {
