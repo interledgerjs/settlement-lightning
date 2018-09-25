@@ -20,6 +20,7 @@ import LightningServerPlugin from './plugins/server'
 import LightningLib from './utils/lightning-lib'
 
 interface LightningPluginOpts {
+
   // directs whether master plugin behaves as client or server
   role: 'client' | 'server'
   // tracks credit relationship with counterparty
@@ -56,6 +57,7 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     settleThreshold?: BigNumber
   }
   private readonly _plugin: LightningServerPlugin | LightningClientPlugin
+  private readonly version = 2
 
   constructor({
     role = 'client',
