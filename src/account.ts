@@ -7,6 +7,7 @@ import {
   BtpPacketData,
   BtpSubProtocol
 } from 'ilp-plugin-btp'
+
 import {
   ilpAndCustomToProtocolData
 } from 'ilp-plugin-btp/src/protocol-data-converter'
@@ -20,7 +21,7 @@ import {
   MoneyHandler
 } from './utils/types'
 
-// Used to denominate which assetScale we are using
+// Used to denominate which asset scale we are using
 export enum Unit {
   BTC = 8, Satoshi = 0
 }
@@ -39,16 +40,18 @@ export const getSubProtocol = (message: BtpPacket, name: string) =>
 export const requestId = async () =>
   (await promisify(randomBytes)(4)).readUInt32BE(0)
 
-/** Performs functionality for both the server and client plugins. */
 export default class LightningAccount {
 
+  // top level plugin
   public master: LightningPlugin
 
+  // counterparty information
   private account: {
     accountName: string
     balance: BigNumber
     lndIdentityPubkey?: string
   }
+  // used to send BTP packets to counterparty
   private sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
 
   constructor(opts: {
@@ -64,22 +67,17 @@ export default class LightningAccount {
     }
   }
 
-  /*********************** Relationship initialization ****************/
-
-  /* Creates a store for each individual account, then attempts
-	 * to connect as peers over the Lightning network */
   public async connect() {
-    // retrieve account
+    // retrieve stored account
     const accountKey = `${this.account.accountName}:account`
     await this.master._store.loadObject(accountKey)
     const savedAccount = this.master._store.getObject(accountKey) || {}
-    // If account exist, convert balance to BigNumber
+    // If account exists, convert balance to BigNumber
     if (typeof savedAccount.balance === 'string') {
       savedAccount.balance = new BigNumber(savedAccount.balance)
     }
     // load account class variable
     this.account = new Proxy({
-      // concat new account to list of previous accounts
       ...this.account,
       ...savedAccount
     }, {
@@ -98,10 +96,8 @@ export default class LightningAccount {
     }
   }
 
-  /*********************** Lightning peering ***********************/
-
-  /* Send personal identity pubkey to server*/
   public async sendPeeringInfo(): Promise < void > {
+    // if already peered over lightning
     if (this.account.lndIdentityPubkey) {
       if (this.master.lnd.isPeer(this.account.lndIdentityPubkey)) {
         this.master._log.trace(`Already peered with : ` +
@@ -130,7 +126,7 @@ export default class LightningAccount {
     if (subProtocol) {
       const { lndIdentityPubkey } = JSON.parse(subProtocol.data.toString())
       if (!this.master.lnd.isPeer(lndIdentityPubkey)) {
-        throw new Error(`Received peeringResponse without existing peer ` +
+        throw new Error(`Received peeringResponse without peer ` +
           `relationship over lightning`)
       }
       this.account.lndIdentityPubkey = lndIdentityPubkey
@@ -139,8 +135,6 @@ export default class LightningAccount {
       throw new Error(`Received improper response to peeringRequest`)
     }
   }
-
-  /********************** Settlement functionality ***********************/
 
   public async attemptSettle(): Promise < void > {
     const settleThreshold = this.master._balance.settleThreshold
@@ -166,7 +160,7 @@ export default class LightningAccount {
       this.master._log.trace(`Attempting to settle with account ` +
         `${this.account.accountName} for ` +
         `${format(settlementAmount, Unit.Satoshi)}`)
-      // Request invoice, pay invoice
+      // begin settlement
       const paymentRequest = await this.requestInvoice(settlementAmount)
       await this.master.lnd.payInvoice(paymentRequest)
       // Send notification of payment
@@ -191,9 +185,6 @@ export default class LightningAccount {
     }
   }
 
-  /***************** Invoice logic *******************/
-
-  // Ask peer to generate invoice
   public async requestInvoice(amt: BigNumber): Promise < string > {
     try {
       // request a paymentRequest identifying an invoice from peer
@@ -236,8 +227,6 @@ export default class LightningAccount {
     amt: BigNumber):
   Promise < void > {
     const invoice = await this.master.lnd.decodePayReq(paymentRequest)
-    // TODO instead of validating, we can just specify amt (satoshis) and
-    // dest_string (identity pubkey) in sendPayment request to lnd
     this._validateInvoiceDestination(invoice)
     this._validateInvoiceAmount(invoice, amt)
   }
@@ -257,11 +246,10 @@ export default class LightningAccount {
     }
   }
 
-  /************************** ILP packet handlers ***************************/
-
   public handlePrepareResponse(
     preparePacket: IlpPacket.IlpPacket,
-    responsePacket: IlpPacket.IlpPacket): void {
+    responsePacket: IlpPacket.IlpPacket
+  ): void {
     const isFulfill = responsePacket.type === IlpPacket.Type.TYPE_ILP_FULFILL
     const isReject = responsePacket.type === IlpPacket.Type.TYPE_ILP_REJECT
     if (isFulfill) {
@@ -280,12 +268,11 @@ export default class LightningAccount {
     }
   }
 
-  /************************** BTP packet handlers ****************************/
-
   // Handles incoming BTP.MESSAGE packets
   public async handleData(
     message: BtpPacket,
-    dataHandler?: DataHandler): Promise < BtpSubProtocol[] > {
+    dataHandler?: DataHandler
+  ): Promise < BtpSubProtocol[] > {
     const peeringRequest = getSubProtocol(message, 'peeringRequest')
     const invoiceRequest = getSubProtocol(message, 'invoiceRequest')
     const ilp = getSubProtocol(message, 'ilp')
@@ -302,7 +289,7 @@ export default class LightningAccount {
       const { amount } = JSON.parse(invoiceRequest.data.toString())
       return await this._handleInvoiceRequest(amount)
     }
-    // Handles ILP prepare packets
+    // forward ILP prepare packets
     if (ilp && ilp.data[0] === IlpPacket.Type.TYPE_ILP_PREPARE) {
       const { expiresAt, amount } = IlpPacket.deserializeIlpPrepare(ilp.data)
       const amountBN = new BigNumber(amount)
@@ -314,13 +301,13 @@ export default class LightningAccount {
   // handles incoming BTP.TRANSFER packets
   public async handleMoney(
     message: BtpPacket,
-    moneyHandler?: MoneyHandler): Promise < BtpSubProtocol[] > {
+    moneyHandler?: MoneyHandler
+  ): Promise < BtpSubProtocol[] > {
     try {
       const invoiceFulfill = getSubProtocol(message, 'invoiceFulfill')
       if (invoiceFulfill) {
         this.master._log.trace(`Handling paid invoice for account ` +
           `${this.account.accountName}`)
-        // check validity through matching sent preimage to fulfilled invoice
         const paymentRequest = JSON.parse(invoiceFulfill.data.toString())
         const invoice = await this.master.lnd.getInvoice(paymentRequest)
         if (this.master.lnd.isFulfilledInvoice(invoice)) {
@@ -347,8 +334,6 @@ export default class LightningAccount {
     }
     return this.master._store.unload(`${this.account.accountName}:account`)
   }
-
-  /********* handlers *****/
 
   // Handles incoming ILP.PREPARE packets
   private async _handlePrepare(
@@ -411,7 +396,8 @@ export default class LightningAccount {
 
   private async _handlePeeringRequest(
     lndIdentityPubkey: string,
-    lndPeeringHost: string): Promise < BtpSubProtocol[] > {
+    lndPeeringHost: string
+  ): Promise < BtpSubProtocol[] > {
     try {
       const peers = await this.master.lnd.listPeers()
       const alreadyPeered = peers.find((peer: any) =>
@@ -419,6 +405,7 @@ export default class LightningAccount {
       if (alreadyPeered) {
         this.master._log.trace(`Already lightning peers with: ` +
           `${lndIdentityPubkey}`)
+        // send back identity pubkey anyway so peer can store it
         return [{
           protocolName: 'peeringResponse',
           contentType: btpPacket.MIME_APPLICATION_JSON,
@@ -426,7 +413,7 @@ export default class LightningAccount {
             lndIdentityPubkey: this.master._lndIdentityPubkey
           }))
         }]
-        // if not peered, connect over lightning
+      // peer over lightning, send back identity pubkey
       } else {
         this.master._log.trace(`Attempting to connect with peer: ` +
           `${lndIdentityPubkey}`)
@@ -463,8 +450,6 @@ export default class LightningAccount {
     }]
   }
 
-  /*********** Balance adjustment logging and error checking ************/
-
   private _addBalance(amount: BigNumber) {
     if (amount.isZero()) {
       return
@@ -480,6 +465,7 @@ export default class LightningAccount {
         `${format(newBalance, Unit.Satoshi)} exceeds maximum of ` +
         `${format(maximum, Unit.Satoshi)}`)
     }
+    this.account.balance = newBalance
     this.master._log.trace(`Debited ${format(amount, Unit.Satoshi)} ` +
       `from account ${this.account.accountName}, new balance is ` +
       `${format(newBalance, Unit.Satoshi)}`)
@@ -500,10 +486,10 @@ export default class LightningAccount {
         `to account ${this.account.accountName}, proposedBalance of ` +
         `${format(newBalance, Unit.Satoshi)} is below the minimum of ` +
         `${format(minimum, Unit.Satoshi)}`)
-      this.master._log.trace(`Credited ${format(amount, Unit.Satoshi)} ` +
-        `to account ${this.account.accountName}, ` + ` new balance ` +
-        `is ${format(newBalance, Unit.Satoshi)}`)
-      this.account.balance = newBalance
     }
+    this.account.balance = newBalance
+    this.master._log.trace(`Credited ${format(amount, Unit.Satoshi)} ` +
+      `to account ${this.account.accountName}, ` + ` new balance ` +
+      `is ${format(newBalance, Unit.Satoshi)}`)
   }
 }

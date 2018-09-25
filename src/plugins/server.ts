@@ -19,6 +19,7 @@ extends MiniAccountsPlugin implements PluginInstance {
   constructor(opts: any) {
     super(opts)
     this._master = opts.master
+    // one account for each client
     this._accounts = new Map()
   }
 

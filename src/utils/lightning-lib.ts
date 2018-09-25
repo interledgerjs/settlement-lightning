@@ -24,10 +24,6 @@ export default class LndLib {
     this.lndHost = opts.lndHost
   }
 
-  /** Creates an invoice for the amount requested.  Returns
-   * the payment_request which will be sent to the person
-   * desiring to pay so that they can complete the payment
-   */
   public async addInvoice(amt: number): Promise < any  > {
     return await this._lndQuery('addInvoice', { value : amt })
   }
@@ -40,17 +36,12 @@ export default class LndLib {
     const opts = { payment_request: paymentRequest }
     const resp = await this._lndQuery('sendPaymentSync', opts)
     const error = resp.payment_error
-
     // TODO find other payment_error types and implement handling for them
-    // error handling
     if (error === 'invoice is already paid') {
       throw new Error('Attempted to pay invoice that has already been paid.')
     }
-
     return resp.payment_preimage
   }
-
-  /******************** Past invoice querying ****************/
 
   public invoiceAmount(invoice: any): BigNumber {
     return invoice.value
@@ -66,36 +57,23 @@ export default class LndLib {
       obj.payment_request === paymentRequest)
   }
 
-  /******************** Peering functions ***********************/
-
-  /** attempts to establish a connection to a new peer, does nothing if
-   * already connected
-   * peerAddress: identity pubkey of peer node
-   * peerHost: host:port on peer listening for P2P connections
-   */
   public async connectPeer(
-    peerAddress: string,
+    peerIdentityPubkey: string,
     peerHost: string): Promise < string > {
-    const opts = { addr : { pubkey: peerAddress, host: peerHost }}
+    const opts = { addr : { pubkey: peerIdentityPubkey, host: peerHost }}
     return await this._lndQuery('connectPeer', opts)
   }
 
-  /** retrieves a list of existing peers and checks if a connection
-   * has already been established
-   */
   public async isPeer(peerIdentityPubKey: string): Promise < boolean > {
-    // checks if at least one peer w/ peer identity pubkey exists
     return (await this.listPeers()).some((p) =>
       p.pub_key === peerIdentityPubKey)
   }
 
-  /** retrieves a list of existing peers */
   public async listPeers(): Promise < any[] > {
     return (await this._lndQuery('listPeers', {})).peers
   }
 
-  /********************* Channel maintenance ***************/
-
+  // checks if some channel exists with sufficient funds
   public async hasAmount(amt: BigNumber): Promise < boolean > {
     return (await this._getMaxChannelBalance()) > amt
   }
@@ -106,10 +84,8 @@ export default class LndLib {
     return activeChannels
   }
 
-  /******************* Lnd Connection Maintenance ****************/
-
   public async connect() {
-    // get ssl certificate
+    // get tls certificate
     const lndCert = await this._getTlsCert()
     // macaroon credentials
     const macaroonCreds = await this._getMacaroonCreds()
@@ -118,17 +94,13 @@ export default class LndLib {
     const combinedCredentials =
       grpc.credentials.combineChannelCredentials(tlsCreds, macaroonCreds)
     // create lightning instance
-    // TODO make this path so that typescript compiles it at all times
     const protoPath: string = './utils/rpc.proto'
     const lnrpc = await this._loadDescriptor(protoPath)
     this.lightning = new lnrpc.Lightning(this.lndHost, combinedCredentials)
     this.connected = true
   }
 
-  /** wrapper around the actual querying function
-   * methodName: string representing actual function on gRPC
-   * options: request options for method
-   */
+  // takes in method and options and communicates with lightning daemon
   private async _lndQuery(methodName: string, options: any): Promise < any > {
     // for any call, ensure we are actually connected to our lnd client
     if (!this.connected) {
@@ -163,9 +135,7 @@ export default class LndLib {
     return maxChannel
   }
 
-  /** Loads the gRPC descriptor from the rpc.proto file
-   * so that we can use it to create the lightning client
-   */
+  // load gRPC descriptor from rpc.proto file
   private async _loadDescriptor(protoPath: string): Promise < any > {
     const opts = {
       keepCase: true,
@@ -179,13 +149,8 @@ export default class LndLib {
     return lnrpcDescriptor.lnrpc
   }
 
-  /** Retrieve the tls certificate from the user's local storage,
-   * LND uses macaroons and tls certificates to authenticate
-   * the gRPC client
-   */
+  // if user didn't pass in tls cert path, get default os location
   private async _getTlsCert(): Promise < string > {
-    /* Retrieve default path of tls.cert for lnd according
-		 * to operating system of the user */
     const certPath: string = this.tlsCertPath || ((os) => {
       switch (os) {
         case 'darwin':
@@ -200,8 +165,7 @@ export default class LndLib {
             `linux or windows.`)
       }
     })(process.platform)
-
-    /* try to access file in certPath, and throw error if file does not exist */
+    // try to access file in certPath, and throw error if file does not exist
     try {
       return fs.readFileSync(certPath)
     } catch (e) {
@@ -209,9 +173,7 @@ export default class LndLib {
     }
   }
 
-  /** Retrieves path of macaroons according to operating system.  User's
-	  * can pass in their own path, but the connector will default to these paths
-	  */
+  // if user didn't pass in macaroon path, get default os location
   private async _getMacaroonCreds(): Promise < any > {
     const macaroonPath: string = this.macaroonPath || ((os) => {
       switch (os) {
@@ -229,7 +191,7 @@ export default class LndLib {
       }
     })(process.platform)
 
-    /* Use path to query file and actually create the gRPC credentials object */
+    // use path to query file and create the gRPC credentials object
     try {
       const macaroon = fs.readFileSync(macaroonPath).toString('hex')
       const metadata = new grpc.Metadata()

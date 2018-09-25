@@ -20,7 +20,9 @@ import LightningServerPlugin from './plugins/server'
 import LightningLib from './utils/lightning-lib'
 
 interface LightningPluginOpts {
+  // directs whether master plugin behaves as client or server
   role: 'client' | 'server'
+  // tracks credit relationship with counterparty
   balance?: {
     minimum?: BigNumber.Value
     maximum?: BigNumber.Value
@@ -39,12 +41,7 @@ interface LightningPluginOpts {
   lnd: LightningLib
 }
 
-/* Master class that creates a sub-plugin using _role.  This
- * is largely used to maintain necessary state while passing the
- * functionality off to the client and server implementations to
- * handle */
 export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
-
   public readonly lnd: LightningLib
   public readonly _lndIdentityPubkey: string
   public readonly _lndPeeringHost: string
@@ -74,6 +71,7 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     } = {}, ...opts
   }: LightningPluginOpts) {
     super()
+    // unable to peer to counterparty without these credentials
     if (typeof lndIdentityPubkey !== 'string') {
       throw new Error(`Lightning identity pubkey required`)
     }
