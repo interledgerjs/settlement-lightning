@@ -49,7 +49,7 @@ export default class LndLib {
   }
 
   public invoiceAmount(invoice: any): BigNumber {
-    return invoice.value
+    return new BigNumber(invoice.value)
   }
 
   public isFulfilledInvoice(invoice: any): boolean {
