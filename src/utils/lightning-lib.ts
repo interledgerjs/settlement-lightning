@@ -22,10 +22,10 @@ export default class LndLib {
   constructor(opts: any) {
     // First lnd query connects to lnd
     this.connected = false
-    this.tlsCertPath = opts.tlsCertPath
-    this.macaroonPath = opts.macaroonPath
-    this.lndHost = opts.lndHost
-    this.grpcPort = opts.grpcPort || '10009'
+    this.tlsCertPath = opts.lnd.tlsCertPath
+    this.macaroonPath = opts.lnd.macaroonPath
+    this.lndHost = opts.lnd.lndHost
+    this.grpcPort = opts.lnd.grpcPort || '10009'
     this.protoPath = path.resolve(__dirname, 'rpc.proto')
   }
 
