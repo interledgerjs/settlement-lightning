@@ -13,6 +13,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./build",
+    "strictPropertyInitialization": false,
     "project": "."
   },
   "includes": [
