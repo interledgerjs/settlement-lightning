@@ -35,17 +35,20 @@ interface LightningPluginOpts {
   // This version only implements Lightning, not BTC directly
   lndIdentityPubkey: string
   // 'host:port' that is listening for P2P lightning connections
-  lndPeeringHost: string
+  lndHost: string
   // max satoshis permitted in each packet
+  peerPort?: string
   maxPacketAmount?: BigNumber.Value
   // lib for calls to lightning daemon
   lnd: LightningLib
 }
 
 export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
+  public static readonly version = 2
   public readonly lnd: LightningLib
   public readonly _lndIdentityPubkey: string
-  public readonly _lndPeeringHost: string
+  public readonly _lndHost: string
+  public readonly _peerPort: string
   public readonly _log: Logger
   public readonly _store: any
   public readonly _role: 'client' | 'server'
@@ -57,12 +60,12 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     settleThreshold?: BigNumber
   }
   private readonly _plugin: LightningServerPlugin | LightningClientPlugin
-  private readonly version = 2
 
   constructor({
     role = 'client',
     lndIdentityPubkey,
-    lndPeeringHost,
+    lndHost,
+    peerPort = '9735',
     maxPacketAmount = Infinity,
     balance: {
       minimum = -Infinity,
@@ -76,7 +79,7 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     if (typeof lndIdentityPubkey !== 'string') {
       throw new Error(`Lightning identity pubkey required`)
     }
-    if (typeof lndPeeringHost !== 'string') {
+    if (typeof lndHost !== 'string') {
       throw new Error(`Lightning peering host required`)
     }
 
@@ -90,7 +93,8 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
       debug(`ilp-plugin-lnd-${this._role}:trace`)
     // lightning peering credentials
     this._lndIdentityPubkey = lndIdentityPubkey
-    this._lndPeeringHost = lndPeeringHost
+    this._lndHost = lndHost
+    this._peerPort = peerPort
     this.lnd = new LightningLib({
       ...opts
     })

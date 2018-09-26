@@ -106,7 +106,7 @@ export default class LightningAccount {
           contentType: btpPacket.MIME_APPLICATION_JSON,
           data: Buffer.from(JSON.stringify({
             lndIdentityPubkey: this.master._lndIdentityPubkey,
-            lndPeeringHost: this.master._lndPeeringHost
+            lndPeeringHost: this.master._lndHost + ':' + this.master._peerPort
           }))
         }]
       }
@@ -248,7 +248,7 @@ export default class LightningAccount {
       const { lndIdentityPubkey, lndPeeringHost } =
         JSON.parse(peeringRequest.data.toString())
       this.master._log.trace(`Peering request received from: ` +
-        `${lndIdentityPubkey}`)
+        `${lndIdentityPubkey}@${lndPeeringHost}`)
       return await this._handlePeeringRequest(lndIdentityPubkey, lndPeeringHost)
     }
     // Generate invoice and send paymentRequest back to peer

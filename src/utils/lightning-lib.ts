@@ -17,6 +17,7 @@ export default class LndLib {
   private readonly tlsCertPath: string
   private readonly macaroonPath: string
   private readonly lndHost: string
+  private readonly grpcPort: string
   private readonly protoPath: string
   constructor(opts: any) {
     // First lnd query connects to lnd
@@ -24,7 +25,8 @@ export default class LndLib {
     this.tlsCertPath = opts.tlsCertPath
     this.macaroonPath = opts.macaroonPath
     this.lndHost = opts.lndHost
-    this.protoPath = './src/utils/rpc.proto'
+    this.grpcPort = opts.grpcPort || '10009'
+    this.protoPath = path.resolve(__dirname, 'rpc.proto')
   }
 
   public async addInvoice(amt: number): Promise < any  > {
@@ -98,7 +100,7 @@ export default class LndLib {
       grpc.credentials.combineChannelCredentials(tlsCreds, macaroonCreds)
     // create lightning instance
     const lnrpc = await this._loadDescriptor(this.protoPath)
-    this.lightning = new lnrpc.Lightning(this.lndHost, combinedCredentials)
+    this.lightning = new lnrpc.Lightning(this.lndHost + ':' + this.grpcPort, combinedCredentials)
     this.connected = true
   }
 
