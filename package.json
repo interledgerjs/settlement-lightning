@@ -2,14 +2,14 @@
   "name": "ilp-plugin-lightning",
   "version": "0.1.1",
   "description": "",
-  "main": "build/src/index.js",
+  "main": "build/index.js",
   "scripts": {
     "test": "jest --detectOpenHandles",
     "lint": "tslint --project .",
     "build": "tsc --project .",
     "buildWatch": "tsc --watch --project .",
     "testWatch": "jest --detectOpenHandles --watch",
-    "copy": "cp src/utils/rpc.proto build/src/utils/rpc.proto",
+    "copy": "cp src/utils/rpc.proto build/utils/rpc.proto",
     "postinstall": "npm-run-all build copy"
   },
   "keywords": [],

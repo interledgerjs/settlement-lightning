@@ -5,22 +5,24 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "inlineSources": true,
-		"strict": true,
+    "strict": true,
     "downlevelIteration": true,
     "suppressImplicitAnyIndexErrors": true,
     "alwaysStrict": true,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    "rootDir": "./src",
     "outDir": "./build",
     "strictPropertyInitialization": false,
     "project": "."
   },
-  "includes": [
-    "test/**/*",
+  "include": [
     "src/**/*"
   ],
-	"exclude": [
-		"build" 
-	]
+  "exclude": [
+    "src/__tests__/**/*",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+  ]
 }
