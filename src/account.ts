@@ -52,12 +52,12 @@ export default class LightningAccount {
     lndIdentityPubkey?: string
   }
   // used to send BTP packets to counterparty
-  private sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
+  private sendMessage: (message: BtpPacket) => Promise<BtpPacketData>
 
   constructor(opts: {
     accountName: string,
     master: LightningPlugin,
-    sendMessage: (message: BtpPacket) => Promise < BtpPacketData >
+    sendMessage: (message: BtpPacket) => Promise<BtpPacketData>
   }) {
     this.master = opts.master
     this.sendMessage = opts.sendMessage
@@ -81,14 +81,14 @@ export default class LightningAccount {
       ...this.account,
       ...savedAccount
     }, {
-      set: (account, key, val) => {
-        this.master._store.set(accountKey, JSON.stringify({
-          ...account,
-          [key]: val
-        }))
-        return Reflect.set(account, key, val)
-      }
-    })
+        set: (account, key, val) => {
+          this.master._store.set(accountKey, JSON.stringify({
+            ...account,
+            [key]: val
+          }))
+          return Reflect.set(account, key, val)
+        }
+      })
     // Clients initiate the exchange of lnd identity pubkeys
     if (this.master._role === 'client') {
       this.master._log.trace(`Sharing identity pubkey with server.`)
@@ -96,7 +96,7 @@ export default class LightningAccount {
     }
   }
 
-  public async sendPeeringInfo(): Promise < void > {
+  public async sendPeeringInfo(): Promise<void> {
     const response = await this.sendMessage({
       type: btpPacket.TYPE_MESSAGE,
       requestId: await requestId(),
@@ -127,7 +127,7 @@ export default class LightningAccount {
     }
   }
 
-  public async attemptSettle(): Promise < void > {
+  public async attemptSettle(): Promise<void> {
     const settleThreshold = this.master._balance.settleThreshold
     try {
       // Check if receive only mode is on
@@ -143,19 +143,34 @@ export default class LightningAccount {
       }
       const settlementAmount =
         this.master._balance.settleTo.minus(this.account.balance)
-      if (!this.master.lnd.hasAmount(settlementAmount)) {
-        return this.master._log.trace(`Cannot settle.  Insufficient ` +
-          `funds in channel to complete settlement of ` +
-          `${format(settlementAmount, Unit.Satoshi)}`)
-      }
       this.master._log.trace(`Attempting to settle with account ` +
         `${this.account.accountName} for ` +
         `${format(settlementAmount, Unit.Satoshi)}`)
       // begin settlement
+      const paymentRequest = await this.requestInvoice()
+      // Validate that there is a route to that peer with sufficient liquidity
+      if (
+        !this.master.lnd.canPayPeer(
+          settlementAmount, this.master._lndIdentityPubkey)
+          ) {
+
+        return this.master._log.error(`Cannot settle.  No route with ` +
+          `sufficient liquidity to complete settlement of ` +
+          `${format(settlementAmount, Unit.Satoshi)}`)
+      }
+      // Optimistically add the balance.
       this._addBalance(settlementAmount)
-      const paymentRequest = await this.requestInvoice(settlementAmount)
-      await this.master.lnd.payInvoice(paymentRequest)
+      try {
+        await this.master.lnd.payInvoice(paymentRequest)
+      } catch (err) {
+        this.master._log.error(`Error while attempting to pay ` +
+          `lightning invoice for payment request: ${paymentRequest}. ` +
+          `Refunding balance for amount: ${settlementAmount}`)
+        this._subBalance(settlementAmount)
+      }
       // Send notification of payment
+      // TODO Subscribe to notifications on the receiver side
+      // so we don't need to do this.
       this.sendMessage({
         type: btpPacket.TYPE_TRANSFER,
         requestId: await requestId(),
@@ -172,12 +187,14 @@ export default class LightningAccount {
           `response to invoice with paymentRequest: ${paymentRequest}, ` +
           `balance between accounts will be imbalanced`)
       })
+      this.master._log.trace(`Updated balance after settlement with ` +
+        `${this.account.accountName}`)
     } catch (err) {
       this.master._log.error(`Failed to settle: ${err.message}`)
     }
   }
 
-  public async requestInvoice(amt: BigNumber): Promise < string > {
+  public async requestInvoice(): Promise<string> {
     try {
       // request a paymentRequest identifying an invoice from peer
       const response = await this.sendMessage({
@@ -187,9 +204,7 @@ export default class LightningAccount {
           protocolData: [{
             protocolName: 'invoiceRequest',
             contentType: btpPacket.MIME_APPLICATION_JSON,
-            data: Buffer.from(JSON.stringify({
-              amount: amt
-            }))
+            data: Buffer.from(JSON.stringify({}))
           }]
         }
       })
@@ -199,7 +214,7 @@ export default class LightningAccount {
       if (subProtocol) {
         const { paymentRequest } = JSON.parse(subProtocol.data.toString())
         try {
-          await this._validatePaymentRequest(paymentRequest, amt)
+          await this._validatePaymentRequest(paymentRequest)
           return paymentRequest
         } catch (err) {
           throw new Error(`Requested invoice is invalid: ${err.message}`)
@@ -240,7 +255,7 @@ export default class LightningAccount {
   public async handleData(
     message: BtpPacket,
     dataHandler?: DataHandler
-  ): Promise < BtpSubProtocol[] > {
+  ): Promise<BtpSubProtocol[]> {
     const peeringRequest = getSubProtocol(message, 'peeringRequest')
     const invoiceRequest = getSubProtocol(message, 'invoiceRequest')
     const ilp = getSubProtocol(message, 'ilp')
@@ -254,8 +269,7 @@ export default class LightningAccount {
     }
     // Generate invoice and send paymentRequest back to peer
     if (invoiceRequest) {
-      const { amount } = JSON.parse(invoiceRequest.data.toString())
-      return await this._handleInvoiceRequest(amount)
+      return await this._handleInvoiceRequest()
     }
     // forward ILP prepare packets
     if (ilp && ilp.data[0] === IlpPacket.Type.TYPE_ILP_PREPARE) {
@@ -270,7 +284,7 @@ export default class LightningAccount {
   public async handleMoney(
     message: BtpPacket,
     moneyHandler?: MoneyHandler
-  ): Promise < BtpSubProtocol[] > {
+  ): Promise<BtpSubProtocol[]> {
     try {
       const invoiceFulfill = getSubProtocol(message, 'invoiceFulfill')
       if (invoiceFulfill) {
@@ -309,7 +323,7 @@ export default class LightningAccount {
     expiresAt: Date,
     dataHandler: DataHandler | undefined,
     ilp: BtpSubProtocol):
-  Promise < BtpSubProtocol[] > {
+    Promise<BtpSubProtocol[]> {
     try {
       // Ensure registration of dataHandler has been completed
       if (typeof dataHandler !== 'function') {
@@ -319,9 +333,9 @@ export default class LightningAccount {
       if (amount.gt(this.master._maxPacketAmount)) {
         throw new IlpPacket.Errors.AmountTooLargeError(
           'Packet size is too large', {
-          receivedAmount: amount.toString(),
-          maximumAmount: this.master._maxPacketAmount.toString()
-        })
+            receivedAmount: amount.toString(),
+            maximumAmount: this.master._maxPacketAmount.toString()
+          })
       }
       // update account w/ amount in prepare packet
       try {
@@ -350,14 +364,14 @@ export default class LightningAccount {
       if (response[0] === IlpPacket.Type.TYPE_ILP_FULFILL) {
         this.master._log.trace(`Received FULFILL from data handler in ` +
           `response to forwarded PREPARE`)
-      // If packet is rejected or times out, revert balance
+        // If packet is rejected or times out, revert balance
       } else {
         this._subBalance(amount)
       }
-      return ilpAndCustomToProtocolData({ ilp : response })
+      return ilpAndCustomToProtocolData({ ilp: response })
     } catch (err) {
       return ilpAndCustomToProtocolData(
-        {ilp: IlpPacket.errorToReject('', err)}
+        { ilp: IlpPacket.errorToReject('', err) }
       )
     }
   }
@@ -365,7 +379,7 @@ export default class LightningAccount {
   private async _handlePeeringRequest(
     lndIdentityPubkey: string,
     lndPeeringHost: string
-  ): Promise < BtpSubProtocol[] > {
+  ): Promise<BtpSubProtocol[]> {
     try {
       const peers = await this.master.lnd.listPeers()
       const alreadyPeered = peers.find((peer: any) =>
@@ -381,7 +395,7 @@ export default class LightningAccount {
             lndIdentityPubkey: this.master._lndIdentityPubkey
           }))
         }]
-      // peer over lightning, send back identity pubkey
+        // peer over lightning, send back identity pubkey
       } else {
         this.master._log.trace(`Attempting to connect with peer: ` +
           `${lndIdentityPubkey}`)
@@ -401,12 +415,10 @@ export default class LightningAccount {
   }
 
   private async _validatePaymentRequest(
-    paymentRequest: string,
-    amt: BigNumber):
-  Promise < void > {
+    paymentRequest: string):
+    Promise<void> {
     const invoice = await this.master.lnd.decodePayReq(paymentRequest)
     this._validateInvoiceDestination(invoice)
-    this._validateInvoiceAmount(invoice, amt)
   }
 
   private _validateInvoiceDestination(invoice: any): void {
@@ -426,12 +438,10 @@ export default class LightningAccount {
   }
 
   // generate invoice and send back to peer
-  private async _handleInvoiceRequest(
-    amt: number): Promise < BtpSubProtocol[] > {
-    this.master._log.trace(`Received request for invoice of size: ` +
-      `${format(amt, Unit.Satoshi)}`)
+  private async _handleInvoiceRequest(): Promise<BtpSubProtocol[]> {
+    this.master._log.trace(`Received request for invoice`)
     // Retrieve new invoice from lnd client
-    const invoice = await this.master.lnd.addInvoice(amt)
+    const invoice = await this.master.lnd.addInvoice()
     const paymentRequest = invoice.payment_request
     this.master._log.trace(`Responding with paymentRequest: ${paymentRequest}`)
     return [{

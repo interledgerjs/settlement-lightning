@@ -29,8 +29,8 @@ export default class LndLib {
     this.protoPath = path.resolve(__dirname, 'rpc.proto')
   }
 
-  public async addInvoice(amt: number): Promise < any  > {
-    return await this._lndQuery('addInvoice', { value : amt })
+  public async addInvoice(): Promise < any  > {
+    return await this._lndQuery('addInvoice', {})
   }
 
   public async decodePayReq(paymentRequest: string): Promise < any > {
@@ -79,8 +79,10 @@ export default class LndLib {
   }
 
   // checks if some channel exists with sufficient funds
-  public async hasAmount(amt: BigNumber): Promise < boolean > {
-    return (await this._getMaxChannelBalance()) > amt
+  public async canPayPeer(amt: BigNumber, dest: string): Promise < boolean > {
+    const opts = {pub_key: dest, amt}
+    const resp = await this._lndQuery('queryRoutes', opts)
+    return JSON.stringify(resp.routes) !== JSON.stringify([])
   }
 
   public async getChannels(): Promise < any[] > {
@@ -100,7 +102,8 @@ export default class LndLib {
       grpc.credentials.combineChannelCredentials(tlsCreds, macaroonCreds)
     // create lightning instance
     const lnrpc = await this._loadDescriptor(this.protoPath)
-    this.lightning = new lnrpc.Lightning(this.lndHost + ':' + this.grpcPort, combinedCredentials)
+    this.lightning =
+    new lnrpc.Lightning(this.lndHost + ':' + this.grpcPort, combinedCredentials)
     this.connected = true
   }
 
