@@ -37,8 +37,11 @@ export default class LndLib {
     return await this._lndQuery('decodePayReq', { pay_req : paymentRequest })
   }
 
-  public async payInvoice(paymentRequest: string): Promise < void > {
-    const opts = { payment_request: paymentRequest }
+  public async payInvoice(
+    paymentRequest: string,
+    amt: BigNumber
+  ): Promise < void > {
+    const opts = { payment_request: paymentRequest, amt: amt.toNumber() }
     const resp = await this._lndQuery('sendPaymentSync', opts)
     const error = resp.payment_error
     // TODO find other payment_error types and implement handling for them
@@ -81,8 +84,12 @@ export default class LndLib {
   // checks if some channel exists with sufficient funds
   public async canPayPeer(amt: BigNumber, dest: string): Promise < boolean > {
     const opts = {pub_key: dest, amt}
-    const resp = await this._lndQuery('queryRoutes', opts)
-    return JSON.stringify(resp.routes) !== JSON.stringify([])
+    try {
+      const resp = await this._lndQuery('queryRoutes', opts)
+      return JSON.stringify(resp.routes) !== JSON.stringify([])
+    } catch (err) {
+      throw new Error(`${err.message}`)
+    }
   }
 
   public async getChannels(): Promise < any[] > {
@@ -114,19 +121,15 @@ export default class LndLib {
       await this.connect()
     }
     // execute lnd request
-    try {
-      const result = await new Promise((resolve, reject) => {
-        this.lightning[methodName](options, (err: Error, response: any) => {
-          if (err) {
-            return reject(err)
-          }
-          resolve(response)
-        })
+    const result = await new Promise((resolve, reject) => {
+      this.lightning[methodName](options, (err: Error, response: any) => {
+        if (err) {
+          throw new Error(`${err.message}`)
+        }
+        resolve(response)
       })
-      return result
-    } catch (e) {
-      throw e
-    }
+    })
+    return result
   }
 
   private async getInfo(): Promise < any > {

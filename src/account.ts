@@ -161,7 +161,7 @@ export default class LightningAccount {
       // Optimistically add the balance.
       this._addBalance(settlementAmount)
       try {
-        await this.master.lnd.payInvoice(paymentRequest)
+        await this.master.lnd.payInvoice(paymentRequest, settlementAmount)
       } catch (err) {
         this.master._log.error(`Error while attempting to pay ` +
           `lightning invoice for payment request: ${paymentRequest}. ` +
