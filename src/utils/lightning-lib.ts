@@ -42,13 +42,17 @@ export default class LndLib {
     amt: BigNumber
   ): Promise < void > {
     const opts = { payment_request: paymentRequest, amt: amt.toNumber() }
-    const resp = await this._lndQuery('sendPaymentSync', opts)
-    const error = resp.payment_error
-    // TODO find other payment_error types and implement handling for them
-    if (error === 'invoice is already paid') {
-      throw new Error('Attempted to pay invoice that has already been paid.')
+    try {
+      const resp = await this._lndQuery('sendPaymentSync', opts)
+      const error = resp.payment_error
+      // TODO find other payment_error types and implement handling for them
+      if (error === 'invoice is already paid') {
+        throw new Error('Attempted to pay invoice that has already been paid.')
+      }
+      return resp.payment_preimage
+    } catch (err) {
+      throw new Error(`${err.message}`)
     }
-    return resp.payment_preimage
   }
 
   public invoiceAmount(invoice: any): BigNumber {
@@ -88,7 +92,7 @@ export default class LndLib {
       const resp = await this._lndQuery('queryRoutes', opts)
       return JSON.stringify(resp.routes) !== JSON.stringify([])
     } catch (err) {
-      throw new Error(`${err.message}`)
+      return false
     }
   }
 

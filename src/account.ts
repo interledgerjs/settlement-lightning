@@ -151,7 +151,7 @@ export default class LightningAccount {
       // Validate that there is a route to that peer with sufficient liquidity
       if (
         !this.master.lnd.canPayPeer(
-          settlementAmount, this.master._lndIdentityPubkey)
+          settlementAmount, this.account.lndIdentityPubkey as string)
           ) {
 
         return this.master._log.error(`Cannot settle.  No route with ` +
@@ -164,7 +164,8 @@ export default class LightningAccount {
         await this.master.lnd.payInvoice(paymentRequest, settlementAmount)
       } catch (err) {
         this.master._log.error(`Error while attempting to pay ` +
-          `lightning invoice for payment request: ${paymentRequest}. ` +
+          `lightning invoice for payment request: ${paymentRequest}:\n ` +
+          `${err}\n` +
           `Refunding balance for amount: ${settlementAmount}`)
         this._subBalance(settlementAmount)
       }
