@@ -152,6 +152,7 @@ export default class LightningAccount {
         `${this.account.accountName} for ` +
         `${format(settlementAmount, Unit.Satoshi)}`)
       // begin settlement
+      this._addBalance(settlementAmount)
       const paymentRequest = await this.requestInvoice(settlementAmount)
       await this.master.lnd.payInvoice(paymentRequest)
       // Send notification of payment
