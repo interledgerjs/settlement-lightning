@@ -83,7 +83,7 @@ export default class LndLib {
 
   // checks if some channel exists with sufficient funds
   public async canPayPeer(amt: BigNumber, dest: string): Promise < boolean > {
-    const opts = {pub_key: dest, amt}
+    const opts = {pub_key: dest, amt: amt.toNumber()}
     try {
       const resp = await this._lndQuery('queryRoutes', opts)
       return JSON.stringify(resp.routes) !== JSON.stringify([])
@@ -121,15 +121,14 @@ export default class LndLib {
       await this.connect()
     }
     // execute lnd request
-    const result = await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       this.lightning[methodName](options, (err: Error, response: any) => {
         if (err) {
-          throw new Error(`${err.message}`)
+          reject(err)
         }
         resolve(response)
       })
     })
-    return result
   }
 
   private async getInfo(): Promise < any > {
