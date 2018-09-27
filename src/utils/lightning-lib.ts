@@ -89,6 +89,8 @@ export default class LndLib {
   public async canPayPeer(amt: BigNumber, dest: string): Promise < boolean > {
     const opts = {pub_key: dest, amt: amt.toNumber()}
     try {
+      const info = await this.getInfo()
+      console.log(info)
       const resp = await this._lndQuery('queryRoutes', opts)
       return JSON.stringify(resp.routes) !== JSON.stringify([])
     } catch (err) {
