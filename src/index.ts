@@ -70,8 +70,7 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     balance: {
       minimum = -Infinity,
       maximum = Infinity,
-      settleTo = 0,
-      settleThreshold = -100000
+      settleTo = 0
     } = {}, ...opts
   }: LightningPluginOpts) {
     super()
