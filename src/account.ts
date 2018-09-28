@@ -392,6 +392,7 @@ export default class LightningAccount {
       if (alreadyPeered) {
         this.master._log.trace(`Already lightning peers with: ` +
           `${lndIdentityPubkey}`)
+        this.account.lndIdentityPubkey = lndIdentityPubkey
         // send back identity pubkey anyway so peer can store it
         return [{
           protocolName: 'peeringResponse',
@@ -405,6 +406,7 @@ export default class LightningAccount {
         this.master._log.trace(`Attempting to connect with peer: ` +
           `${lndIdentityPubkey}`)
         await this.master.lnd.connectPeer(lndIdentityPubkey, lndPeeringHost)
+        this.account.lndIdentityPubkey = lndIdentityPubkey
         this.master._log.trace(`Successfully peered with: ${lndIdentityPubkey}`)
         return [{
           protocolName: 'peeringResponse',
