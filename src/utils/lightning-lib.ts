@@ -153,6 +153,7 @@ export default class LndLib {
   private async _getMaxSpendableBalance(): Promise < any > {
     const channels = await this.getChannels()
     const maxSpendableAmount = channels
+      .filter((c) => !!c.local_balance)
       .map((c) => (c.local_balance - (c.capacity * 0.01)))
       .reduce((acc, cur) => Math.max(acc, cur), 0)
 
