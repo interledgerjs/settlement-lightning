@@ -147,7 +147,10 @@ export default class LndLib {
   }
 
   private async _listInvoices(): Promise < any > {
-    return (await this._lndQuery('listInvoices', {})).invoices
+    const opts = {
+      reversed: true
+    }
+    return (await this._lndQuery('listInvoices', opts)).invoices
   }
 
   private async _getMaxSpendableBalance(): Promise < any > {
