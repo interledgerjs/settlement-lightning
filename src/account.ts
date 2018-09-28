@@ -144,7 +144,7 @@ export default class LightningAccount {
       const settlementAmount =
         this.master._balance.settleTo.minus(this.account.balance)
       this.master._log.trace(`Attempting to settle with account ` +
-        `${this.account.accountName} for ` +
+        `${this.account.lndIdentityPubkey} for ` +
         `${format(settlementAmount, Unit.Satoshi)}`)
       // begin settlement
       const paymentRequest = await this.requestInvoice()
@@ -198,7 +198,7 @@ export default class LightningAccount {
           `balance between accounts will be imbalanced`)
       })
       this.master._log.trace(`Updated balance after settlement with ` +
-        `${this.account.accountName}`)
+        `${this.account.lndIdentityPubkey}`)
     } catch (err) {
       this.master._log.error(`Failed to settle: ${err.message}`)
     }
@@ -294,13 +294,13 @@ export default class LightningAccount {
       const invoiceFulfill = getSubProtocol(message, 'invoiceFulfill')
       if (invoiceFulfill) {
         this.master._log.trace(`Handling paid invoice for account ` +
-          `${this.account.accountName}`)
+          `${this.account.lndIdentityPubkey}`)
         const paymentRequest = JSON.parse(invoiceFulfill.data.toString())
         const invoice = await this.master.lnd.getInvoice(paymentRequest)
         if (this.master.lnd.isFulfilledInvoice(invoice)) {
           this._subBalance(this.master.lnd.invoiceAmount(invoice))
           this.master._log.trace(`Updated balance after settlement with ` +
-            `${this.account.accountName}`)
+            `${this.account.lndIdentityPubkey}`)
         } else {
           this.master._log.trace(`Payment request does not correspond ` +
             `to a settled invoice`)
@@ -475,13 +475,13 @@ export default class LightningAccount {
     const newBalance = this.account.balance.plus(amount)
     if (newBalance.gt(maximum)) {
       throw new Error(`Cannot debit ${format(amount, Unit.Satoshi)} from ` +
-        `account ${this.account.accountName}, proposed balance of ` +
+        `account ${this.account.lndIdentityPubkey}, proposed balance of ` +
         `${format(newBalance, Unit.Satoshi)} exceeds maximum of ` +
         `${format(maximum, Unit.Satoshi)}`)
     }
     this.account.balance = newBalance
     this.master._log.trace(`Debited ${format(amount, Unit.Satoshi)} ` +
-      `from account ${this.account.accountName}, new balance is ` +
+      `from account ${this.account.lndIdentityPubkey}, new balance is ` +
       `${format(newBalance, Unit.Satoshi)}`)
   }
 
@@ -497,13 +497,13 @@ export default class LightningAccount {
     const newBalance = this.account.balance.minus(amount)
     if (newBalance.lt(minimum)) {
       throw new Error(`Cannot credit ${format(amount, Unit.Satoshi)} ` +
-        `to account ${this.account.accountName}, proposedBalance of ` +
+        `to account ${this.account.lndIdentityPubkey}, proposedBalance of ` +
         `${format(newBalance, Unit.Satoshi)} is below the minimum of ` +
         `${format(minimum, Unit.Satoshi)}`)
     }
     this.account.balance = newBalance
     this.master._log.trace(`Credited ${format(amount, Unit.Satoshi)} ` +
-      `to account ${this.account.accountName}, ` + ` new balance ` +
+      `to account ${this.account.lndIdentityPubkey}, ` + ` new balance ` +
       `is ${format(newBalance, Unit.Satoshi)}`)
   }
 }
