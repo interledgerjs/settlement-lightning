@@ -163,7 +163,7 @@ export default class LightningAccount {
       // }
 
       if (!this.master.lnd.hasAmount(settlementAmount)) {
-        return this.master._log.trace(`Cannot settle.  Insufficient ` +
+        return this.master._log.error(`Cannot settle.  Insufficient ` +
           `funds in channel to complete settlement of ` +
           `${format(settlementAmount, Unit.Satoshi)}`)
       }
@@ -172,11 +172,11 @@ export default class LightningAccount {
       try {
         await this.master.lnd.payInvoice(paymentRequest, settlementAmount)
       } catch (err) {
-        this.master._log.error(`Error while attempting to pay ` +
+        this._subBalance(settlementAmount)
+        throw new Error(`Error while attempting to pay ` +
           `lightning invoice for payment request: ${paymentRequest}:\n ` +
           `${err}\n` +
           `Refunding balance for amount: ${settlementAmount}`)
-        this._subBalance(settlementAmount)
       }
       // Send notification of payment
       // TODO Subscribe to notifications on the receiver side
@@ -223,19 +223,14 @@ export default class LightningAccount {
         p.protocolName === 'invoiceResponse')
       if (subProtocol) {
         const { paymentRequest } = JSON.parse(subProtocol.data.toString())
-        try {
-          await this._validatePaymentRequest(paymentRequest)
-          return paymentRequest
-        } catch (err) {
-          throw new Error(`Requested invoice is invalid: ${err.message}`)
-        }
-      } else {
+        await this._validatePaymentRequest(paymentRequest)
+        return paymentRequest
+        } else {
         throw new Error(`BTP response to requestInvoice did not include ` +
           `invoice data.`)
       }
     } catch (err) {
-      this.master._log.trace(`Failed to request invoice: ${err.message}`)
-      return ''
+      throw new Error(`Failed to request invoice: ${err.message}`)
     }
   }
 
@@ -431,7 +426,7 @@ export default class LightningAccount {
       const invoice = await this.master.lnd.decodePayReq(paymentRequest)
       this._validateInvoiceDestination(invoice)
     } catch (err) {
-      throw new Error (`${err.message}`)
+      throw new Error (`Invalid payment request: ${err.message}`)
     }
   }
 
