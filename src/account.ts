@@ -427,8 +427,12 @@ export default class LightningAccount {
   private async _validatePaymentRequest(
     paymentRequest: string):
     Promise<void> {
-    const invoice = await this.master.lnd.decodePayReq(paymentRequest)
-    this._validateInvoiceDestination(invoice)
+    try {
+      const invoice = await this.master.lnd.decodePayReq(paymentRequest)
+      this._validateInvoiceDestination(invoice)
+    } catch (err) {
+      throw new Error (`${err.message}`)
+    }
   }
 
   private _validateInvoiceDestination(invoice: any): void {
