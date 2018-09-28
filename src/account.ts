@@ -148,13 +148,23 @@ export default class LightningAccount {
         `${format(settlementAmount, Unit.Satoshi)}`)
       // begin settlement
       const paymentRequest = await this.requestInvoice()
-      // Validate that there is a route to that peer with sufficient liquidity
-      const canPay = await this.master.lnd.canPayPeer(
-        settlementAmount, this.account.lndIdentityPubkey as string)
-      if (!canPay) {
 
-        return this.master._log.error(`Cannot settle.  No route with ` +
-          `sufficient liquidity to complete settlement of ` +
+      // TODO This isn't working with grpc, but works on the local node.
+      // Probably worth filing an issue.
+
+      // Validate that there is a route to that peer with sufficient liquidity
+      // const canPay = await this.master.lnd.canPayPeer(
+      //   settlementAmount, this.account.lndIdentityPubkey as string)
+      // if (!canPay) {
+
+      //   return this.master._log.error(`Cannot settle.  No route with ` +
+      //     `sufficient liquidity to complete settlement of ` +
+      //     `${format(settlementAmount, Unit.Satoshi)}`)
+      // }
+
+      if (!this.master.lnd.hasAmount(settlementAmount)) {
+        return this.master._log.trace(`Cannot settle.  Insufficient ` +
+          `funds in channel to complete settlement of ` +
           `${format(settlementAmount, Unit.Satoshi)}`)
       }
       // Optimistically add the balance.

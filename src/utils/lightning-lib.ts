@@ -98,6 +98,11 @@ export default class LndLib {
     }
   }
 
+  public async hasAmount(amt: BigNumber): Promise < boolean > {
+    const spendableBalnce = await this._getMaxSpendableBalance()
+    return  new BigNumber(spendableBalnce).gt(amt)
+  }
+
   public async getChannels(): Promise < any[] > {
     const channels = (await this._lndQuery('listChannels', {})).channels
     const activeChannels = channels.filter((c: any) => c.active)
@@ -145,10 +150,13 @@ export default class LndLib {
     return (await this._lndQuery('listInvoices', {})).invoices
   }
 
-  private async _getMaxChannelBalance(): Promise < any > {
+  private async _getMaxSpendableBalance(): Promise < any > {
     const channels = await this.getChannels()
-    const maxChannel = Math.max(...(channels.map((c) => c.local_balance)))
-    return maxChannel
+    const maxSpendableAmount = channels
+      .map((c) => (c.local_balance - (c.capacity * 0.01)))
+      .reduce((acc, cur) => Math.max(acc, cur), 0)
+
+    return maxSpendableAmount
   }
 
   // load gRPC descriptor from rpc.proto file
