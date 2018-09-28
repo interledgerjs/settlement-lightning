@@ -129,24 +129,27 @@ export default class LightningAccount {
 
   public async attemptSettle(): Promise<void> {
     const settleThreshold = this.master._balance.settleThreshold
+    // Check if receive only mode is on
+    if (!settleThreshold) {
+      return this.master._log.trace('Cannot settle. Threshold is undefined')
+    }
+    // determine if we need to settle
+    const shouldSettle = settleThreshold.gt(this.account.balance)
+    if (!shouldSettle) {
+      return this.master._log.trace(`Should not settle.  Balance of ` +
+        `${format(this.account.balance, Unit.Satoshi)} is not below ` +
+        `settleThreshold of ${format(settleThreshold, Unit.Satoshi)}`)
+    }
+    const settlementAmount =
+      this.master._balance.settleTo.minus(this.account.balance)
+    this.master._log.trace(`Attempting to settle with account ` +
+      `${this.account.lndIdentityPubkey} for ` +
+      `${format(settlementAmount, Unit.Satoshi)}`)
+    // begin settlement
+    // Optimistically add the balance.
+    this._addBalance(settlementAmount)
+    // After this point, any uncaught or thrown error should revert balance.
     try {
-      // Check if receive only mode is on
-      if (!settleThreshold) {
-        return this.master._log.trace('Cannot settle. Threshold is undefined')
-      }
-      // determine if we need to settle
-      const shouldSettle = settleThreshold.gt(this.account.balance)
-      if (!shouldSettle) {
-        return this.master._log.trace(`Should not settle.  Balance of ` +
-          `${format(this.account.balance, Unit.Satoshi)} is not below ` +
-          `settleThreshold of ${format(settleThreshold, Unit.Satoshi)}`)
-      }
-      const settlementAmount =
-        this.master._balance.settleTo.minus(this.account.balance)
-      this.master._log.trace(`Attempting to settle with account ` +
-        `${this.account.lndIdentityPubkey} for ` +
-        `${format(settlementAmount, Unit.Satoshi)}`)
-      // begin settlement
       const paymentRequest = await this.requestInvoice()
 
       // TODO This isn't working with grpc, but works on the local node.
@@ -165,14 +168,12 @@ export default class LightningAccount {
       if (!this.master.lnd.hasAmount(settlementAmount)) {
         return this.master._log.error(`Cannot settle.  Insufficient ` +
           `funds in channel to complete settlement of ` +
-          `${format(settlementAmount, Unit.Satoshi)}`)
+          `${format(settlementAmount, Unit.Satoshi)} ` +
+          `Refunding balance for amount: ${settlementAmount}`)
       }
-      // Optimistically add the balance.
-      this._addBalance(settlementAmount)
       try {
         await this.master.lnd.payInvoice(paymentRequest, settlementAmount)
       } catch (err) {
-        this._subBalance(settlementAmount)
         throw new Error(`Error while attempting to pay ` +
           `lightning invoice for payment request: ${paymentRequest}:\n ` +
           `${err}\n` +
@@ -200,6 +201,7 @@ export default class LightningAccount {
       this.master._log.trace(`Updated balance after settlement with ` +
         `${this.account.lndIdentityPubkey}`)
     } catch (err) {
+      this._subBalance(settlementAmount)
       this.master._log.error(`Failed to settle: ${err.message}`)
     }
   }
