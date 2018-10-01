@@ -343,6 +343,10 @@ export default class LightningAccount {
           this.subBalance(invoiceAmount)
           this.master._log.trace(`Updated balance after settlement with ` +
             `${this.account.lndIdentityPubkey}`)
+          if (typeof moneyHandler !== 'function') {
+            throw new Error('no money handler registered')
+          }
+          await moneyHandler(invoiceAmount.toString())
         } else {
           this.master._log.trace(`Payment request does not correspond ` +
             `to a settled invoice`)
