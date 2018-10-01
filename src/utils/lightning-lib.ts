@@ -48,6 +48,10 @@ export default class LndLib {
     if (error === 'invoice is already paid') {
       throw new Error('Attempted to pay invoice that has already been paid.')
       }
+    if (!!error) {
+      throw new Error(`Error attempting to send payment: ${error}`)
+      }
+    console.log(`Received payment preimage!!!: ${resp.payment_preimage}`)
     return resp.payment_preimage
   }
 
