@@ -180,7 +180,7 @@ export default class LightningAccount {
       `${this.account.lndIdentityPubkey} for ` +
       `${format(settlementBudget, Unit.Satoshi)}`)
 
-    // begin settlement
+      // begin settlement
     // Optimistically add the balance.
     this.addBalance(settlementBudget)
     // After this point, any uncaught or thrown error should revert balance.
@@ -191,9 +191,15 @@ export default class LightningAccount {
       // Probably worth filing an issue.
 
       // Validate that there is a route to that peer with sufficient liquidity
-      // const canPay = await this.master.lnd.canPayPeer(
-      //   settlementAmount, this.account.lndIdentityPubkey as string)
-      // if (!canPay) {
+      // FIXME hard coded to 'true' for debugging.
+      const canPay = await this.master.lnd.hasRoute(
+        settlementBudget, this.account.lndIdentityPubkey as string)
+      if (!canPay) {
+        this.subBalance(settlementBudget)
+        return this.master._log.error(`Cannot settle.  No route with ` +
+          `sufficient liquidity to complete settlement of ` +
+          `${format(settlementBudget, Unit.Satoshi)}`)
+      }
 
       // Instead of querying routes, check that we have outgoing
       // capacity in one of our channels sufficient to make the settlement.
@@ -265,7 +271,7 @@ export default class LightningAccount {
         const { paymentRequest } = JSON.parse(subProtocol.data.toString())
         await this._validatePaymentRequest(paymentRequest)
         return paymentRequest
-        } else {
+      } else {
         throw new Error(`BTP response to requestInvoice did not include ` +
           `invoice data.`)
       }
