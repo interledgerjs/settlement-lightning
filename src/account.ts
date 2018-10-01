@@ -147,7 +147,7 @@ export default class LightningAccount {
       `${format(settlementAmount, Unit.Satoshi)}`)
     // begin settlement
     // Optimistically add the balance.
-    this._addBalance(settlementAmount)
+    this.addBalance(settlementBudget)
     // After this point, any uncaught or thrown error should revert balance.
     try {
       const paymentRequest = await this.requestInvoice()
@@ -201,7 +201,7 @@ export default class LightningAccount {
       this.master._log.trace(`Updated balance after settlement with ` +
         `${this.account.lndIdentityPubkey}`)
     } catch (err) {
-      this._subBalance(settlementAmount)
+      this.subBalance(settlementBudget)
       this.master._log.error(`Failed to settle: ${err.message}`)
     }
   }
@@ -246,7 +246,7 @@ export default class LightningAccount {
       this.master._log.trace(`Received FULFILL response to forwarded PREPARE`)
       const amount = new BigNumber(preparePacket.data.amount)
       try {
-        this._subBalance(amount)
+        this.subBalance(amount)
       } catch (err) {
         this.master._log.trace(`Failed to fulfill response from PREPARE: ` +
           `${err.message}`)
@@ -300,7 +300,7 @@ export default class LightningAccount {
         const paymentRequest = JSON.parse(invoiceFulfill.data.toString())
         const invoice = await this.master.lnd.getInvoice(paymentRequest)
         if (this.master.lnd.isFulfilledInvoice(invoice)) {
-          this._subBalance(this.master.lnd.invoiceAmount(invoice))
+          this.subBalance(invoiceAmount)
           this.master._log.trace(`Updated balance after settlement with ` +
             `${this.account.lndIdentityPubkey}`)
         } else {
@@ -346,7 +346,7 @@ export default class LightningAccount {
       }
       // update account w/ amount in prepare packet
       try {
-        this._addBalance(amount)
+        this.addBalance(amount)
       } catch (err) {
         this.master._log.trace(`Failed to forward PREPARE: ${err.message}`)
         throw new IlpPacket.Errors.InsufficientLiquidityError(err.message)
@@ -373,7 +373,7 @@ export default class LightningAccount {
           `response to forwarded PREPARE`)
         // If packet is rejected or times out, revert balance
       } else {
-        this._subBalance(amount)
+        this.subBalance(amount)
       }
       return ilpAndCustomToProtocolData({ ilp: response })
     } catch (err) {
@@ -430,7 +430,7 @@ export default class LightningAccount {
       const invoice = await this.master.lnd.decodePayReq(paymentRequest)
       this._validateInvoiceDestination(invoice)
     } catch (err) {
-      throw new Error (`Invalid payment request: ${err.message}`)
+      throw new Error(`Invalid payment request: ${err.message}`)
     }
   }
 
@@ -466,7 +466,7 @@ export default class LightningAccount {
     }]
   }
 
-  private _addBalance(amount: BigNumber) {
+  private addBalance(amount: BigNumber) {
     if (amount.isZero()) {
       return
     }
@@ -487,7 +487,7 @@ export default class LightningAccount {
       `${format(newBalance, Unit.Satoshi)}`)
   }
 
-  private _subBalance(amount: BigNumber) {
+  private subBalance(amount: BigNumber) {
     if (amount.isZero()) {
       return
     }
