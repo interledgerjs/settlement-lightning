@@ -47,6 +47,8 @@ export default class LndLib {
     // TODO find other payment_error types and implement handling for them
     if (error === 'invoice is already paid') {
       throw new Error('Attempted to pay invoice that has already been paid.')
+      } else if (error === 'unable to find a path to destination') {
+        throw new Error('Unable to find route for payment.')
       }
     if (!!error) {
       throw new Error(`Error attempting to send payment: ${error}`)
