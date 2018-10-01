@@ -50,6 +50,7 @@ export default class LightningAccount {
     accountName: string
     balance: BigNumber
     lndIdentityPubkey?: string
+    payoutAmount: BigNumber
   }
   // used to send BTP packets to counterparty
   private sendMessage: (message: BtpPacket) => Promise<BtpPacketData>
@@ -63,7 +64,14 @@ export default class LightningAccount {
     this.sendMessage = opts.sendMessage
     this.account = {
       accountName: opts.accountName,
-      balance: new BigNumber(0)
+      balance: new BigNumber(0),
+      payoutAmount: this.master._balance.settleTo.gt(0)
+        // If we're prefunding, we don't care about total fulfills
+        // Since we take the min of this and the settleTo/settleThreshold delta,
+        //  this essentially disregards the payout amount
+        ? new BigNumber(Infinity)
+        // If we're settling up after fulfills, then we do care
+        : new BigNumber(0)
     }
   }
 
@@ -75,6 +83,9 @@ export default class LightningAccount {
     // If account exists, convert balance to BigNumber
     if (typeof savedAccount.balance === 'string') {
       savedAccount.balance = new BigNumber(savedAccount.balance)
+    }
+    if (typeof savedAccount.payoutAmount === 'string') {
+      savedAccount.payoutAmount = new BigNumber(savedAccount.payoutAmount)
     }
     // load account class variable
     this.account = new Proxy({
@@ -128,6 +139,10 @@ export default class LightningAccount {
   }
 
   public async attemptSettle(): Promise<void> {
+    // Biggest difference from ETH is that settlements are all or nothing.
+    // We don't try and create a new channel or make smaller settlements,
+    // just refund the full amount when a failure occurs.
+    let settlementBudget = new BigNumber(0)
     const settleThreshold = this.master._balance.settleThreshold
     // Check if receive only mode is on
     if (!settleThreshold) {
@@ -140,11 +155,31 @@ export default class LightningAccount {
         `${format(this.account.balance, Unit.Satoshi)} is not below ` +
         `settleThreshold of ${format(settleThreshold, Unit.Satoshi)}`)
     }
-    const settlementAmount =
+    settlementBudget =
       this.master._balance.settleTo.minus(this.account.balance)
+    if (settlementBudget.lte(0)) {
+      return this.master._log.error(`Critical settlement error: ` +
+      `settlement threshold triggered, but settle amount of ` +
+      `${format(settlementBudget, Unit.Satoshi)} is 0 or negative`)
+    }
+
+    // If we're not prefunding, the amount should be limited by
+    // the total packets we've fulfilled
+    // If we're prefunding, the payoutAmount is infinity,
+    // so it doesn't affect the amount to settle
+    settlementBudget =
+      BigNumber.min(settlementBudget, this.account.payoutAmount)
+
+    if (settlementBudget.lte(0)) {
+      return this.master._log.trace(`Cannot settle: no fulfilled ` +
+      `packets have yet to be settled, ` +
+      `payout amount is ${format(this.account.payoutAmount, Unit.Satoshi)}`)
+    }
+
     this.master._log.trace(`Attempting to settle with account ` +
       `${this.account.lndIdentityPubkey} for ` +
-      `${format(settlementAmount, Unit.Satoshi)}`)
+      `${format(settlementBudget, Unit.Satoshi)}`)
+
     // begin settlement
     // Optimistically add the balance.
     this.addBalance(settlementBudget)
@@ -160,24 +195,24 @@ export default class LightningAccount {
       //   settlementAmount, this.account.lndIdentityPubkey as string)
       // if (!canPay) {
 
-      //   return this.master._log.error(`Cannot settle.  No route with ` +
-      //     `sufficient liquidity to complete settlement of ` +
-      //     `${format(settlementAmount, Unit.Satoshi)}`)
-      // }
+      // Instead of querying routes, check that we have outgoing
+      // capacity in one of our channels sufficient to make the settlement.
+      // This assumes we can find a route that uses that channel.
 
-      if (!this.master.lnd.hasAmount(settlementAmount)) {
+      if (!this.master.lnd.hasAmount(settlementBudget)) {
+        this.subBalance(settlementBudget)
         return this.master._log.error(`Cannot settle.  Insufficient ` +
           `funds in channel to complete settlement of ` +
-          `${format(settlementAmount, Unit.Satoshi)} ` +
-          `Refunding balance for amount: ${settlementAmount}`)
+          `${format(settlementBudget, Unit.Satoshi)} ` +
+          `Refunding balance for amount: ${settlementBudget}`)
       }
       try {
-        await this.master.lnd.payInvoice(paymentRequest, settlementAmount)
+        await this.master.lnd.payInvoice(paymentRequest, settlementBudget)
       } catch (err) {
         throw new Error(`Error while attempting to pay ` +
           `lightning invoice for payment request: ${paymentRequest}:\n ` +
           `${err}\n` +
-          `Refunding balance for amount: ${settlementAmount}`)
+          `Refunding balance for amount: ${settlementBudget}`)
       }
       // Send notification of payment
       // TODO Subscribe to notifications on the receiver side
@@ -186,7 +221,7 @@ export default class LightningAccount {
         type: btpPacket.TYPE_TRANSFER,
         requestId: await requestId(),
         data: {
-          amount: settlementAmount.toFixed(0, BigNumber.ROUND_CEIL),
+          amount: settlementBudget.toFixed(0, BigNumber.ROUND_CEIL),
           protocolData: [{
             protocolName: 'invoiceFulfill',
             contentType: btpPacket.MIME_APPLICATION_JSON,
@@ -195,9 +230,12 @@ export default class LightningAccount {
         }
       }).catch((err) => {
         this.master._log.error(`Error while sending payment request in ` +
-          `response to invoice with paymentRequest: ${paymentRequest}, ` +
-          `balance between accounts will be imbalanced`)
+          `response to invoice with paymentRequest: ${paymentRequest}: ` +
+          `${err}\n` +
+          `Balance between accounts will be imbalanced`)
       })
+      this.account.payoutAmount =
+        this.account.payoutAmount.plus(settlementBudget)
       this.master._log.trace(`Updated balance after settlement with ` +
         `${this.account.lndIdentityPubkey}`)
     } catch (err) {
@@ -247,6 +285,7 @@ export default class LightningAccount {
       const amount = new BigNumber(preparePacket.data.amount)
       try {
         this.subBalance(amount)
+        this.account.payoutAmount = this.account.payoutAmount.plus(amount)
       } catch (err) {
         this.master._log.trace(`Failed to fulfill response from PREPARE: ` +
           `${err.message}`)
@@ -299,6 +338,7 @@ export default class LightningAccount {
           `${this.account.lndIdentityPubkey}`)
         const paymentRequest = JSON.parse(invoiceFulfill.data.toString())
         const invoice = await this.master.lnd.getInvoice(paymentRequest)
+        const invoiceAmount = this.master.lnd.invoiceAmount(invoice)
         if (this.master.lnd.isFulfilledInvoice(invoice)) {
           this.subBalance(invoiceAmount)
           this.master._log.trace(`Updated balance after settlement with ` +
