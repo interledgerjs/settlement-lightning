@@ -3,10 +3,9 @@ import LightningPlugin = require('..')
 import MiniAccountsPlugin from 'ilp-plugin-mini-accounts'
 
 import * as IlpPacket from 'ilp-packet'
-import BtpPlugin, { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
+import { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
 
-import LightningAccount, { convert, requestId, Unit } from '../account'
-import LightningLib from '../utils/lightning-lib'
+import LightningAccount from '../account'
 
 import { PluginInstance } from '../utils/types'
 

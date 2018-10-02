@@ -2,11 +2,8 @@ import * as IlpPacket from 'ilp-packet'
 const btpPacket = require('btp-packet')
 
 import BtpPlugin, { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
+import LightningAccount, {requestId } from '../account'
 import { PluginInstance } from '../utils/types'
-
-import LightningPlugin = require('..')
-import LightningAccount, { convert, requestId, Unit } from '../account'
-import LightningLib from '../utils/lightning-lib'
 
 export default class LightningClientPlugin
 extends BtpPlugin implements PluginInstance {

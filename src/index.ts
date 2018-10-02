@@ -11,10 +11,6 @@ import {
   PluginInstance
 } from './utils/types'
 
-import * as IlpPacket from 'ilp-packet'
-import BtpPlugin, { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
-
-import LightningAccount, { convert, requestId, Unit } from './account'
 import LightningClientPlugin from './plugins/client'
 import LightningServerPlugin from './plugins/server'
 import LightningLib from './utils/lightning-lib'
