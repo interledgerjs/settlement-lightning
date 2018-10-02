@@ -33,7 +33,10 @@
     "lightning",
     "lightning-network"
   ],
-  "author": "Interledger Team",
+  "contributors": [
+    "Kevin Davis <kevin@kava.io>",
+    "Austin King <austin@stratalabs.io>"
+  ],
   "license": "Apache-2.0",
   "dependencies": {
     "@grpc/proto-loader": "^0.3.0",
