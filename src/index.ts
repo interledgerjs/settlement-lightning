@@ -68,11 +68,11 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     peerPort = '9735',
     maxPacketAmount = Infinity,
     balance: {
-      minimum = -Infinity,
       maximum = Infinity,
+      settleTo = 0,
       // tslint:disable-next-line:no-unnecessary-initializer
       settleThreshold = undefined,
-      settleTo = 0
+      minimum = -Infinity
     } = {}, ...opts
   }: LightningPluginOpts) {
     super()
@@ -98,14 +98,6 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     this._peerPort = peerPort
     this.lnd = new LightningLib({
       ...opts
-    })
-
-    // create server or client plugin
-    const internalPlugin = this._role === 'client' ?
-      LightningClientPlugin : LightningServerPlugin
-    this._plugin = new internalPlugin({
-      ...opts,
-      master: this
     })
 
     this._balance = {
@@ -134,6 +126,14 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
           `maximum balance must be greater than minimum balance`)
       }
     }
+
+        // create server or client plugin
+    const internalPlugin = this._role === 'client' ?
+      LightningClientPlugin : LightningServerPlugin
+    this._plugin = new internalPlugin({
+      ...opts,
+      master: this
+    })
 
     this._plugin.on('connect', () => this.emitAsync('connect'))
     this._plugin.on('disconnect', () => this.emitAsync('disconnect'))
