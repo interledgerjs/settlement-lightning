@@ -86,23 +86,6 @@ export default class LndLib {
     return (await this._lndQuery('listPeers', {})).peers
   }
 
-  // checks if some channel exists with sufficient funds
-  public async hasRoute(amt: BigNumber, dest: string): Promise < boolean > {
-    const opts = {pub_key: dest, amt: amt.toNumber()}
-    try {
-      const resp = await this._lndQuery('queryRoutes', opts)
-      const hasRoutes = JSON.stringify(resp.routes) !== JSON.stringify([])
-      if (hasRoutes) {
-        console.log(`Found Routes for ${amt} satoshis to ` +
-        `${dest}: ${resp.routes}`)
-      }
-      return true
-    } catch (err) {
-      // FIXME fail silently because this isn't working properly.
-      return true
-    }
-  }
-
   public async hasAmount(amt: BigNumber): Promise < boolean > {
     const spendableBalnce = await this._getMaxSpendableBalance()
     return  new BigNumber(spendableBalnce).gt(amt)

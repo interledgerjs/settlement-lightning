@@ -62,6 +62,7 @@ export default class LightningAccount {
   }) {
     this.master = opts.master
     this.sendMessage = opts.sendMessage
+    // Tracks the account we have with our counterparty.
     this.account = {
       accountName: opts.accountName,
       balance: new BigNumber(0),
@@ -187,22 +188,11 @@ export default class LightningAccount {
     try {
       const paymentRequest = await this.requestInvoice()
 
-      // TODO This isn't working with grpc, but works on the local node.
-      // Probably worth filing an issue.
+      // TODO Query routes (not working with grpc) instead of
+      // checking for channel capacity.
 
-      // Validate that there is a route to that peer with sufficient liquidity
-      // FIXME hard coded to 'true' for debugging.
-      const canPay = await this.master.lnd.hasRoute(
-        settlementBudget, this.account.lndIdentityPubkey as string)
-      if (!canPay) {
-        this.subBalance(settlementBudget)
-        return this.master._log.error(`Cannot settle.  No route with ` +
-          `sufficient liquidity to complete settlement of ` +
-          `${format(settlementBudget, Unit.Satoshi)}`)
-      }
-
-      // Instead of querying routes, check that we have outgoing
-      // capacity in one of our channels sufficient to make the settlement.
+      // Check that we have outgoing capacity in one of our channels
+      // sufficient to make the settlement.
       // This assumes we can find a route that uses that channel.
 
       if (!this.master.lnd.hasAmount(settlementBudget)) {
