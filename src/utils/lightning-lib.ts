@@ -25,13 +25,15 @@ export default class LndLib {
     this.connected = false
     this.tlsCertPath = opts.lnd.tlsCertPath
     if (isBase64(this.tlsCertPath)) {
-      let certpath = `${process.env.HOME}/.lnd/${this.tlsCertPath.slice(-16)}.cert`
+      const certpath =
+      `${process.env.HOME}/.lnd/${this.tlsCertPath.slice(-16)}.cert`
       fs.writeFileSync(certpath, this.tlsCertPath, { encoding: 'base64' })
       this.tlsCertPath = certpath
     }
     this.macaroonPath = opts.lnd.macaroonPath
     if (isBase64(this.macaroonPath)) {
-      let macpath = `${process.env.HOME}/.lnd/${this.macaroonPath.slice(-16)}.macaroon`
+      const macpath =
+        `${process.env.HOME}/.lnd/${this.macaroonPath.slice(-16)}.macaroon`
       fs.writeFileSync(macpath, this.macaroonPath, { encoding: 'base64' })
       this.macaroonPath = macpath
     }
