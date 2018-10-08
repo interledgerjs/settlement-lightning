@@ -2,6 +2,7 @@ const grpc = require('grpc')
 const fs = require('fs')
 const process = require('process')
 const path = require('path')
+const isBase64 = require('is-base64')
 const protoLoader = require('@grpc/proto-loader')
 const promisify = require('util').promisify
 import BigNumber from 'bignumber.js'
@@ -23,7 +24,17 @@ export default class LndLib {
     // First lnd query connects to lnd
     this.connected = false
     this.tlsCertPath = opts.lnd.tlsCertPath
+    if (isBase64(this.tlsCertPath)) {
+      let certpath = `${process.env.HOME}/.lnd/${this.tlsCertPath.slice(-16)}.cert`
+      fs.writeFileSync(certpath, this.tlsCertPath, { encoding: 'base64' })
+      this.tlsCertPath = certpath
+    }
     this.macaroonPath = opts.lnd.macaroonPath
+    if (isBase64(this.macaroonPath)) {
+      let macpath = `${process.env.HOME}/.lnd/${this.macaroonPath.slice(-16)}.macaroon`
+      fs.writeFileSync(macpath, this.macaroonPath, { encoding: 'base64' })
+      this.macaroonPath = macpath
+    }
     this.lndHost = opts.lnd.lndHost
     this.grpcPort = opts.lnd.grpcPort || '10009'
     this.protoPath = path.resolve(__dirname, 'rpc.proto')
