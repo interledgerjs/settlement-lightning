@@ -106,6 +106,9 @@ export default class LightningAccount {
       this.master._log.trace(`Sharing identity pubkey with server.`)
       await this.sendPeeringInfo()
     }
+    if (this.master._settleOnConnect) {
+      return this.attemptSettle()
+    }
   }
 
   public async sendPeeringInfo(): Promise<void> {

@@ -35,6 +35,7 @@ interface LightningPluginOpts {
   // max satoshis permitted in each packet
   peerPort?: string
   maxPacketAmount?: BigNumber.Value
+  settleOnConnect?: boolean
   // lib for calls to lightning daemon
   lnd: LightningLib
 }
@@ -45,6 +46,7 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
   public readonly _lndIdentityPubkey: string
   public readonly _lndHost: string
   public readonly _peerPort: string
+  public readonly _settleOnConnect: boolean
   public readonly _log: Logger
   public readonly _store: any
   public readonly _role: 'client' | 'server'
@@ -62,6 +64,7 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     lndIdentityPubkey,
     lndHost,
     peerPort = '9735',
+    settleOnConnect = role === 'client',
     maxPacketAmount = Infinity,
     balance: {
       maximum = Infinity,
@@ -92,6 +95,7 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     this._lndIdentityPubkey = lndIdentityPubkey
     this._lndHost = lndHost
     this._peerPort = peerPort
+    this._settleOnConnect = settleOnConnect
     this.lnd = new LightningLib({
       ...opts
     })
