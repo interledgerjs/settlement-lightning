@@ -31,6 +31,9 @@ jobs:
               npm test
       # lint
       - run: npm run lint
+      # build
+      - run: npm run build
+      - run: npm run copy
       # upload coverage to codecov.io
       - run: npx codecov
       - persist_to_workspace:
