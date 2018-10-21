@@ -39,7 +39,7 @@ export default class LndLib {
     }
     this.lndHost = opts.lnd.lndHost
     this.grpcPort = opts.lnd.grpcPort || '10009'
-    this.protoPath = path.resolve(__dirname, 'rpc.proto')
+    this.protoPath = opts.lnd.protoPath || path.resolve(__dirname, 'rpc.proto')
   }
 
   public async addInvoice(): Promise < any  > {
