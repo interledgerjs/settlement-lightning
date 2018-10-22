@@ -1,5 +1,5 @@
 import BigNumber from 'bignumber.js'
-import * as debug from 'debug'
+import debug from 'debug'
 import { EventEmitter2 } from 'eventemitter2'
 import createLogger from 'ilp-logger'
 import StoreWrapper from './utils/store-wrapper'
@@ -13,7 +13,7 @@ import {
 
 import LightningClientPlugin from './plugins/client'
 import LightningServerPlugin from './plugins/server'
-import LightningLib from './utils/lightning-lib'
+import LightningLib, {LndLibOpts} from './utils/lightning-lib'
 
 interface LightningPluginOpts {
 
@@ -37,10 +37,11 @@ interface LightningPluginOpts {
   maxPacketAmount?: BigNumber.Value
   settleOnConnect?: boolean
   // lib for calls to lightning daemon
-  lnd: LightningLib
+  lnd: LndLibOpts
 }
 
-export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
+export default class LightningPlugin
+  extends EventEmitter2 implements PluginInstance {
   public static readonly version = 2
   public readonly lnd: LightningLib
   public readonly _lndIdentityPubkey: string
@@ -89,15 +90,17 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
       .dp(0, BigNumber.ROUND_DOWN)
     // logging tools
     this._log = opts._log || createLogger(`ilp-plugin-lnd-${this._role}`)
-    this._log.trace = this._log.trace ||
-      debug(`ilp-plugin-lnd-${this._role}:trace`)
+    this._log.trace = this._log.trace
+    ||  debug(`ilp-plugin-lnd-${this._role}:trace`)
     // lightning peering credentials
     this._lndIdentityPubkey = lndIdentityPubkey
     this._lndHost = lndHost
     this._peerPort = peerPort
     this._settleOnConnect = settleOnConnect
     this.lnd = new LightningLib({
-      ...opts
+      tlsCertInput: opts.lnd.tlsCertInput,
+      macaroonInput: opts.lnd.macaroonInput,
+      lndHost: opts.lnd.lndHost
     })
 
     this._balance = {

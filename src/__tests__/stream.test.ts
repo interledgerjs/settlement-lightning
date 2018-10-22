@@ -1,8 +1,8 @@
 import test from 'ava'
 import BigNumber from 'bignumber.js'
-import * as getPort from 'get-port'
+import getPort from 'get-port'
 import * as IlpStream from 'ilp-protocol-stream'
-import LightningPlugin = require('..')
+import LightningPlugin from '..'
 import { convert, Unit } from '../account'
 
 test('client streams data and money to server', async (t: any) => {
@@ -21,9 +21,10 @@ test('client streams data and money to server', async (t: any) => {
     lndHost: process.env.LND_PEERHOST_C!,
     // @ts-ignore
     lnd: {
-      tlsCertPath: process.env.LND_TLSCERT_C!,
-      macaroonPath: process.env.LND_MACAROON_C!,
+      tlsCertInput: process.env.LND_TLSCERT_C!,
+      macaroonInput: process.env.LND_MACAROON_C!,
       lndHost: process.env.LND_PEERHOST_C!
+
     }!,
     balance: {
       settleTo: SENDER_SETTLE_TO,
@@ -49,8 +50,9 @@ test('client streams data and money to server', async (t: any) => {
     lndHost: process.env.LND_PEERHOST_B!,
     // @ts-ignore
     lnd: {
-      tlsCertPath: process.env.LND_TLSCERT_B!,
-      macaroonPath: process.env.LND_MACAROON_B!,
+      // @ts-ignore
+      tlsCertInput: process.env.LND_TLSCERT_B!,
+      macaroonInput: process.env.LND_MACAROON_B!,
       lndHost: process.env.LND_PEERHOST_B!
     },
     balance: {

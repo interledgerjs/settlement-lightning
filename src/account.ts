@@ -1,4 +1,4 @@
-import LightningPlugin = require('.')
+import LightningPlugin from '.'
 
 const btpPacket = require('btp-packet')
 import * as IlpPacket from 'ilp-packet'

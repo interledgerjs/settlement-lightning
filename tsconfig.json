@@ -10,6 +10,7 @@
     "suppressImplicitAnyIndexErrors": true,
     "alwaysStrict": true,
     "declaration": true,
+    "esModuleInterop": true,
     "declarationMap": true,
     "sourceMap": true,
     "rootDir": "./src",
@@ -21,8 +22,6 @@
     "src/**/*"
   ],
   "exclude": [
-    "src/__tests__/**/*",
-    "**/*.test.ts",
     "**/*.spec.ts",
   ]
 }
