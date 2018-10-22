@@ -57,7 +57,7 @@
     "@types/jest": "^23.3.1",
     "ava": "github:avajs/ava",
     "get-port": "^4.0.0",
-    "ilp-protocol-stream": "github:interledgerjs/ilp-protocol-stream#75305c6a957184d4c3c532eeed05671a55305464",
+    "ilp-protocol-stream": "github:interledgerjs/ilp-protocol-stream#ko-receive-only-tests",
     "jest": "^23.5.0",
     "nyc": "^13.0.1",
     "ts-jest": "^23.1.4",
