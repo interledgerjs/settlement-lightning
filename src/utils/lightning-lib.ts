@@ -1,45 +1,51 @@
 const grpc = require('grpc')
-const fs = require('fs')
-const process = require('process')
+import * as fs from 'fs'
 const path = require('path')
 const isBase64 = require('is-base64')
 const protoLoader = require('@grpc/proto-loader')
-const promisify = require('util').promisify
 import BigNumber from 'bignumber.js'
 
 process.env.GRPC_SSL_CIPHER_SUITES = 'HIGH+ECDSA'
 
-const sleep = require('util').promisify(setTimeout)
+export interface LndLibOpts {
+  tlsCertInput: string,
+  macaroonInput: string,
+  lndHost: string,
+  grpcPort?: string,
+  protoPath?: string
+}
 
 export default class LndLib {
 
   private lightning: any
   private connected: boolean
-  private readonly tlsCertPath: string
-  private readonly macaroonPath: string
+  private readonly tlsCert: Buffer
+  private readonly macaroon: string
   private readonly lndHost: string
   private readonly grpcPort: string
   private readonly protoPath: string
-  constructor(opts: any) {
+  constructor(opts: LndLibOpts) {
     // First lnd query connects to lnd
     this.connected = false
-    this.tlsCertPath = opts.lnd.tlsCertPath
-    if (isBase64(this.tlsCertPath)) {
-      const certpath =
-      `${__dirname}/${this.tlsCertPath.slice(-16).replace('/', '')}.cert`
-      fs.writeFileSync(certpath, this.tlsCertPath, { encoding: 'base64' })
-      this.tlsCertPath = certpath
+    if (isBase64(opts.tlsCertInput)) {
+      this.tlsCert = Buffer.from(opts.tlsCertInput, 'base64')
+    } else if (fs.existsSync(opts.tlsCertInput)) {
+      this.tlsCert = fs.readFileSync(opts.tlsCertInput)
+    } else {
+      throw new Error('TLS Cert is not a valid file or base64 string.')
     }
-    this.macaroonPath = opts.lnd.macaroonPath
-    if (isBase64(this.macaroonPath)) {
-      const macpath =
-        `${__dirname}/${this.macaroonPath.slice(-16).replace('/', '')}.macaroon`
-      fs.writeFileSync(macpath, this.macaroonPath, { encoding: 'base64' })
-      this.macaroonPath = macpath
+    if (isBase64(opts.macaroonInput)) {
+      this.macaroon =
+        Buffer.from(opts.macaroonInput, 'base64').toString('hex')
+    } else if (fs.existsSync(opts.macaroonInput)) {
+      this.macaroon =
+        fs.readFileSync(opts.macaroonInput).toString('hex')
+    } else {
+      throw new Error('Macaroon is not a valid file or base64 string.')
     }
-    this.lndHost = opts.lnd.lndHost
-    this.grpcPort = opts.lnd.grpcPort || '10009'
-    this.protoPath = opts.lnd.protoPath || path.resolve(__dirname, 'rpc.proto')
+    this.lndHost = opts.lndHost
+    this.grpcPort = opts.grpcPort || '10009'
+    this.protoPath = opts.protoPath || path.resolve(__dirname, 'rpc.proto')
   }
 
   public async addInvoice(): Promise < any  > {
@@ -112,7 +118,7 @@ export default class LndLib {
 
   public async connect() {
     // get tls certificate
-    const lndCert = await this._getTlsCert()
+    const lndCert = this.tlsCert
     // macaroon credentials
     const macaroonCreds = await this._getMacaroonCreds()
     // combine credentials for lnrpc
@@ -178,59 +184,17 @@ export default class LndLib {
     return lnrpcDescriptor.lnrpc
   }
 
-  // if user didn't pass in tls cert path, get default os location
-  private async _getTlsCert(): Promise < string > {
-    const certPath: string = this.tlsCertPath || ((os) => {
-      switch (os) {
-        case 'darwin':
-          return `${process.env.HOME}/Library/Application Support/Lnd/tls.cert`
-        case 'linux':
-          return `${process.env.HOME}/.lnd/tls.cert`
-          // TODO unsure of path for windows, giving it same path as linux
-        case 'win32':
-          return `${process.env.HOME}/.lnd/tls.cert`
-        default:
-          throw new Error(`lnd tls.cert path the OS does not match mac, ` +
-            `linux or windows.`)
-      }
-    })(process.platform)
-    // try to access file in certPath, and throw error if file does not exist
-    try {
-      return fs.readFileSync(certPath)
-    } catch (e) {
-      throw new Error('tls.cert does not exist in default location for this OS')
-    }
-  }
-
   // if user didn't pass in macaroon path, get default os location
   private async _getMacaroonCreds(): Promise < any > {
-    const macaroonPath: string = this.macaroonPath || ((os) => {
-      switch (os) {
-        case 'darwin':
-          return `${process.env.HOME}/Library/Application Support/` +
-            `Lnd/admin.macaroon`
-        case 'linux':
-          return `${process.env.HOME}/.lnd/admin.macaroon`
-          // TODO unsure of path for windows, giving it same path as linux
-        case 'win32':
-          return `${process.env.HOME}/.lnd/admin.macaroon`
-        default:
-          throw new Error(`Query for macaroonPath failed because OS does ` +
-            `not match mac, linux or windows.`)
-      }
-    })(process.platform)
-
     // use path to query file and create the gRPC credentials object
     try {
-      const macaroon = fs.readFileSync(macaroonPath).toString('hex')
       const metadata = new grpc.Metadata()
-      metadata.add('macaroon', macaroon)
+      metadata.add('macaroon', this.macaroon)
       const macaroonCreds = grpc.credentials.createFromMetadataGenerator(
         (_args: any, callback: any) => callback(null, metadata))
       return macaroonCreds
     } catch (err) {
-      throw new Error(`admin.macaroon does not exist in default location ` +
-        `for this OS: ${err.message}`)
+      throw new Error(`Macaroon is not properly formatted ${err.message}`)
     }
   }
 }
