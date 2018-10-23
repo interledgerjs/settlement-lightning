@@ -1,8 +1,8 @@
 import test from 'ava'
 import BigNumber from 'bignumber.js'
-import getPort from 'get-port'
+import * as getPort from 'get-port'
 import * as IlpStream from 'ilp-protocol-stream'
-import LightningPlugin from '..'
+import LightningPlugin = require('..')
 import { convert, Unit } from '../account'
 
 test('client streams data and money to server', async (t: any) => {

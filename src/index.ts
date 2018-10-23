@@ -1,5 +1,5 @@
 import BigNumber from 'bignumber.js'
-import debug from 'debug'
+import * as debug from 'debug'
 import { EventEmitter2 } from 'eventemitter2'
 import createLogger from 'ilp-logger'
 import StoreWrapper from './utils/store-wrapper'
@@ -40,8 +40,7 @@ interface LightningPluginOpts {
   lnd: LndLibOpts
 }
 
-export default class LightningPlugin
-  extends EventEmitter2 implements PluginInstance {
+export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
   public static readonly version = 2
   public readonly lnd: LightningLib
   public readonly _lndIdentityPubkey: string
