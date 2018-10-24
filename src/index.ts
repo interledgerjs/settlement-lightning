@@ -96,12 +96,7 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     this._lndHost = lndHost
     this._peerPort = peerPort
     this._settleOnConnect = settleOnConnect
-    this.lnd = new LightningLib({
-      tlsCertInput: opts.lnd.tlsCertInput,
-      macaroonInput: opts.lnd.macaroonInput,
-      lndHost: opts.lnd.lndHost
-    })
-
+    this.lnd = new LightningLib(opts.lnd)
     this._balance = {
       minimum: new BigNumber(minimum).dp(0, BigNumber.ROUND_FLOOR),
       maximum: new BigNumber(maximum).dp(0, BigNumber.ROUND_FLOOR),

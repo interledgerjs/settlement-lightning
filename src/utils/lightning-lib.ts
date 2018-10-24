@@ -52,8 +52,31 @@ export default class LndLib {
     return await this._lndQuery('addInvoice', {})
   }
 
+  public async subscribeToInvoices(): Promise<any> {
+    if (!this.connected) {
+      await this.connect()
+    }
+    const invoices = this.lightning.subscribeInvoices({})
+    return invoices
+  }
+
   public async decodePayReq(paymentRequest: string): Promise < any > {
     return await this._lndQuery('decodePayReq', { pay_req : paymentRequest })
+  }
+
+  public async queryRoutes(
+    pubKey: string,
+    amount: string | number | BigNumber,
+    numRoutes: string | number | BigNumber = 10): Promise <any> {
+    if (!this.connected) {
+      await this.connect()
+    }
+    const opts = {
+      pub_key: pubKey,
+      amt: amount.toString(),
+      num_routes: numRoutes.toString()
+    }
+    return await this._lndQuery('QueryRoutes', opts)
   }
 
   public async payInvoice(
