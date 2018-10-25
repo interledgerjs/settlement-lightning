@@ -43,7 +43,7 @@ export const requestId = async () =>
 export default class LightningAccount {
 
   // top level plugin
-  public master: LightningPlugin
+  private master: LightningPlugin
 
   // counterparty information
   private account: {
@@ -80,7 +80,7 @@ export default class LightningAccount {
     // retrieve stored account
     const accountKey = `${this.account.accountName}:account`
     await this.master._store.loadObject(accountKey)
-    const savedAccount = this.master._store.getObject(accountKey) || {}
+    const savedAccount: any = this.master._store.getObject(accountKey) || {}
     // If account exists, convert balance to BigNumber
     if (typeof savedAccount.balance === 'string') {
       savedAccount.balance = new BigNumber(savedAccount.balance)

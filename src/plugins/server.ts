@@ -7,7 +7,7 @@ import { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
 
 import LightningAccount from '../account'
 
-import { PluginInstance } from '../utils/types'
+import { PluginInstance, PluginServices } from '../utils/types'
 
 export default class LightningServerPlugin
 extends MiniAccountsPlugin implements PluginInstance {
@@ -15,8 +15,8 @@ extends MiniAccountsPlugin implements PluginInstance {
   private _accounts: Map < string, LightningAccount >
   private _master: LightningPlugin
 
-  constructor(opts: any) {
-    super(opts)
+  constructor(opts: any, api: PluginServices) {
+    super(opts, api)
     this._master = opts.master
     // one account for each client
     this._accounts = new Map()

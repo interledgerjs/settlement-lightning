@@ -3,13 +3,19 @@ import * as debug from 'debug'
 import { EventEmitter2 } from 'eventemitter2'
 import createLogger from 'ilp-logger'
 import StoreWrapper from './utils/store-wrapper'
+const MemoryStore = require('ilp-store-memory')
 
 import {
   DataHandler,
   Logger,
   MoneyHandler,
-  PluginInstance
+  PluginInstance,
+  PluginServices
 } from './utils/types'
+
+import {
+  Store
+} from 'ilp-plugin-mini-accounts/src/types'
 
 import LightningClientPlugin from './plugins/client'
 import LightningServerPlugin from './plugins/server'
@@ -48,7 +54,7 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
   public readonly _peerPort: string
   public readonly _settleOnConnect: boolean
   public readonly _log: Logger
-  public readonly _store: any
+  public readonly _store: StoreWrapper
   public readonly _role: 'client' | 'server'
   public readonly _maxPacketAmount: BigNumber
   public readonly _balance: {
@@ -59,21 +65,28 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
   }
   private readonly _plugin: LightningServerPlugin | LightningClientPlugin
 
-  constructor({
-    role = 'client',
-    lndIdentityPubkey,
-    lndHost,
-    peerPort = '9735',
-    settleOnConnect = role === 'client',
-    maxPacketAmount = Infinity,
-    balance: {
-      maximum = Infinity,
-      settleTo = 0,
-      // tslint:disable-next-line:no-unnecessary-initializer
-      settleThreshold = undefined,
-      minimum = -Infinity
-    } = {}, ...opts
-  }: LightningPluginOpts) {
+  constructor(
+    {
+      role = 'client',
+      lndIdentityPubkey,
+      lndHost,
+      peerPort = '9735',
+      settleOnConnect = role === 'client',
+      maxPacketAmount = Infinity,
+      balance: {
+        maximum = Infinity,
+        settleTo = 0,
+        // tslint:disable-next-line:no-unnecessary-initializer
+        settleThreshold = undefined,
+        minimum = -Infinity
+      } = {},
+      ...opts
+    }: LightningPluginOpts,
+    {
+      log,
+      store = new MemoryStore()
+    }: PluginServices = {}
+  ) {
     super()
     // unable to peer to counterparty without these credentials
     if (typeof lndIdentityPubkey !== 'string') {
@@ -84,13 +97,14 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     }
 
     this._role = role
-    this._store = new StoreWrapper(opts._store)
-    this._maxPacketAmount = new BigNumber(maxPacketAmount).abs()
+    this._store = new StoreWrapper(store)
+    this._maxPacketAmount = new BigNumber(maxPacketAmount)
+      .abs()
       .dp(0, BigNumber.ROUND_DOWN)
     // logging tools
-    this._log = opts._log || createLogger(`ilp-plugin-lnd-${this._role}`)
-    this._log.trace = this._log.trace
-    ||  debug(`ilp-plugin-lnd-${this._role}:trace`)
+    this._log = log || createLogger(`ilp-plugin-lightning-${this._role}`)
+    this._log.trace =
+      this._log.trace || debug(`ilp-plugin-lnd-${this._role}:trace`)
     // lightning peering credentials
     this._lndIdentityPubkey = lndIdentityPubkey
     this._lndHost = lndHost
@@ -124,13 +138,13 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
       }
     }
 
-        // create server or client plugin
-    const internalPlugin = this._role === 'client' ?
-      LightningClientPlugin : LightningServerPlugin
+    // create server or client plugin
+    const internalPlugin =
+      this._role === 'client' ? LightningClientPlugin : LightningServerPlugin
     this._plugin = new internalPlugin({
       ...opts,
       master: this
-    })
+    }, { store, log })
 
     this._plugin.on('connect', () => this.emitAsync('connect'))
     this._plugin.on('disconnect', () => this.emitAsync('disconnect'))

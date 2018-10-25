@@ -3,15 +3,15 @@ const btpPacket = require('btp-packet')
 
 import BtpPlugin, { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
 import LightningAccount, {requestId } from '../account'
-import { PluginInstance } from '../utils/types'
+import { PluginInstance, PluginServices } from '../utils/types'
 
 export default class LightningClientPlugin
 extends BtpPlugin implements PluginInstance {
 
   private _account: LightningAccount
 
-  constructor(opts: any) {
-    super(opts)
+  constructor(opts: any, api: PluginServices) {
+    super(opts, api)
     this._account = new LightningAccount({
       master: opts.master,
       // server is only counterparty

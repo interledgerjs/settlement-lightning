@@ -3,6 +3,10 @@ export type MoneyHandler = (amount: string) => Promise<void>
 
 import { EventEmitter2 } from 'eventemitter2'
 
+import {
+  Store
+} from 'ilp-plugin-mini-accounts/src/types'
+
 export interface PluginInstance extends EventEmitter2 {
   connect(options: {}): Promise<void>
   disconnect(): Promise<void>
@@ -23,4 +27,9 @@ export interface Logger {
   error(...msg: any[]): void
   debug(...msg: any[]): void
   trace(...msg: any[]): void
+}
+
+export interface PluginServices {
+  log?: Logger
+  store?: Store
 }
