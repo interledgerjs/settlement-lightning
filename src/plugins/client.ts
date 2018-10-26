@@ -16,6 +16,11 @@ extends BtpPlugin implements PluginInstance {
       master: opts.master,
       // server is only counterparty
       accountName: 'server',
+      moneyHandler: async (amount) => {
+        if (this._moneyHandler) {
+          return this._moneyHandler(amount)
+        }
+      },
       sendMessage: (message: BtpPacket) => this._call('', message)
     })
   }
@@ -30,13 +35,6 @@ extends BtpPlugin implements PluginInstance {
     message: BtpPacket
   ): Promise < BtpSubProtocol[] > {
     return this._account.handleData(message, this._dataHandler)
-  }
-
-  public _handleMoney(
-    from: string,
-    message: BtpPacket
-  ): Promise < BtpSubProtocol[] > {
-    return this._account.handleMoney(message, this._moneyHandler)
   }
 
   public async sendData(buffer: Buffer): Promise < Buffer > {

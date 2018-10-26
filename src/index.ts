@@ -1,6 +1,7 @@
 import BigNumber from 'bignumber.js'
 import * as debug from 'debug'
 import { EventEmitter2 } from 'eventemitter2'
+import { EventEmitter } from 'events'
 import createLogger from 'ilp-logger'
 import StoreWrapper from './utils/store-wrapper'
 const MemoryStore = require('ilp-store-memory')
@@ -19,21 +20,18 @@ import {
 
 import LightningClientPlugin from './plugins/client'
 import LightningServerPlugin from './plugins/server'
-import LightningLib, {LndLibOpts} from './utils/lightning-lib'
+import LightningLib, { LndLibOpts } from './utils/lightning-lib'
 
 interface LightningPluginOpts {
-
   // directs whether master plugin behaves as client or server
   role: 'client' | 'server'
   // tracks credit relationship with counterparty
   balance?: {
-    minimum?: BigNumber.Value
-    maximum?: BigNumber.Value
-    settleTo?: BigNumber.Value
-    settleThreshold?: BigNumber.Value
+    minimum?: BigNumber.Value;
+    maximum?: BigNumber.Value;
+    settleTo?: BigNumber.Value;
+    settleThreshold?: BigNumber.Value;
   }
-  _store?: any
-  _log?: Logger
   // This version only implements Lightning, not BTC directly
   lndIdentityPubkey: string
   // 'host:port' that is listening for P2P lightning connections
@@ -44,11 +42,13 @@ interface LightningPluginOpts {
   settleOnConnect?: boolean
   // lib for calls to lightning daemon
   lnd: LndLibOpts
+  subscription: EventEmitter
 }
 
 export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
   public static readonly version = 2
   public readonly lnd: LightningLib
+  public subscription: any
   public readonly _lndIdentityPubkey: string
   public readonly _lndHost: string
   public readonly _peerPort: string
@@ -58,10 +58,10 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
   public readonly _role: 'client' | 'server'
   public readonly _maxPacketAmount: BigNumber
   public readonly _balance: {
-    minimum: BigNumber
-    maximum: BigNumber
-    settleTo: BigNumber
-    settleThreshold?: BigNumber
+    minimum: BigNumber;
+    maximum: BigNumber;
+    settleTo: BigNumber;
+    settleThreshold?: BigNumber;
   }
   private readonly _plugin: LightningServerPlugin | LightningClientPlugin
 
@@ -115,26 +115,35 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
       minimum: new BigNumber(minimum).dp(0, BigNumber.ROUND_FLOOR),
       maximum: new BigNumber(maximum).dp(0, BigNumber.ROUND_FLOOR),
       settleTo: new BigNumber(settleTo).dp(0, BigNumber.ROUND_FLOOR),
-      settleThreshold: settleThreshold ?
-        new BigNumber(settleThreshold).dp(0, BigNumber.ROUND_FLOOR) : undefined
+      settleThreshold: settleThreshold
+        ? new BigNumber(settleThreshold).dp(0, BigNumber.ROUND_FLOOR)
+        : undefined
     }
     if (this._balance.settleThreshold) {
       if (!this._balance.maximum.gte(this._balance.settleTo)) {
-        throw new Error(`Invalid balance configuration: ` +
-          `maximum balance must be greater than or equal to settleTo`)
+        throw new Error(
+          `Invalid balance configuration: ` +
+            `maximum balance must be greater than or equal to settleTo`
+        )
       }
       if (!this._balance.settleTo.gte(this._balance.settleThreshold)) {
-        throw new Error(`Invalid balance configuration: ` +
-          `settleTo mustbe greater than or equal to settleThreshold`)
+        throw new Error(
+          `Invalid balance configuration: ` +
+            `settleTo mustbe greater than or equal to settleThreshold`
+        )
       }
       if (!this._balance.settleThreshold.gte(this._balance.minimum)) {
-        throw new Error(`Invalid balance configuration: ` +
-          `must be greater than or equal to minimum balance`)
+        throw new Error(
+          `Invalid balance configuration: ` +
+            `must be greater than or equal to minimum balance`
+        )
       }
     } else {
       if (!this._balance.maximum.gt(this._balance.minimum)) {
-        throw new Error(`Invalid balance configuration: ` +
-          `maximum balance must be greater than minimum balance`)
+        throw new Error(
+          `Invalid balance configuration: ` +
+            `maximum balance must be greater than minimum balance`
+        )
       }
     }
 
@@ -152,6 +161,7 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
   }
 
   public async connect() {
+    this.subscription = await this.lnd.subscribeToInvoices()
     return this._plugin.connect()
   }
 
@@ -169,8 +179,10 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
   }
 
   public async sendMoney(amount: string) {
-    this._log.error(`sendMoney is not supported: use plugin balance ` +
-      `configuration instead of connector balance for settlement`)
+    this._log.error(
+      `sendMoney is not supported: use plugin balance ` +
+        `configuration instead of connector balance for settlement`
+    )
   }
 
   public registerDataHandler(dataHandler: DataHandler) {
