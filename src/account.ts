@@ -215,21 +215,21 @@ export default class LightningAccount {
     // After this point, any uncaught or thrown error should revert balance.
     try {
       const invoice = await this.requestInvoice()
-      const decodedPayReq = await this.master.lnd.decodePayReq(
-        invoice.payment_request
-      )
-      const routes = (await this.master.lnd.queryRoutes(
-        decodedPayReq.destination,
-        settlementBudget
-      )).routes
-      if (!routes.length) {
-        this.subBalance(settlementBudget)
-        return this.master._log.error(
-          `Cannot settle. No routes with ` +
-            `sufficient liquidity found  to ` +
-            `${decodedPayReq.destination}.`
-        )
-      }
+      // const decodedPayReq = await this.master.lnd.decodePayReq(
+      //   invoice.payment_request
+      // )
+      // const routes = (await this.master.lnd.queryRoutes(
+      //   decodedPayReq.destination,
+      //   settlementBudget
+      // )).routes
+      // if (!routes.length) {
+      //   this.subBalance(settlementBudget)
+      //   return this.master._log.error(
+      //     `Cannot settle. No routes with ` +
+      //       `sufficient liquidity found  to ` +
+      //       `${decodedPayReq.destination}.`
+      //   )
+      // }
       try {
         await this.master.lnd.payInvoice(
           invoice.payment_request, settlementBudget)
