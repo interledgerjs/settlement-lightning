@@ -1,7 +1,6 @@
 # ilp-plugin-lightning
 
 - [Description](#description)
-- [Demo](#demo)
 - [Lightning Specific Protocols](#lightning-specific-protocols)
 - [API](#api)
 
@@ -13,22 +12,13 @@ This is a plugin that integrates [Lightning](https://lightning.network/)
 to the Interledger network.  Using this plugin, one will be able to
 communicate value from the Bitcoin or Litecoin blockchain to any other
 currency on the Interledger network.
- 
-This plugin assumes that a client already has some payment channel 
-open, connected to the greater lightning network.  The following versions
-will implement the opening and closing of payment channels so that 
-users will not need a pre-existing connection to the lightning network.
+
+This plugin assumes that a client already has some payment channel
+open, connected to the greater lightning network.  Note that connectivity and speed within the Lightning network for peers that do not share a channel is not guaranteed, so opening a channel directly will lead to a better UX.
 
 If you're unfamiliar with lightning, you can learn more about
 how it works [here](https://dev.lightning.community/).
 
-## Demo
-
-If you want to run this plugin, you'll need both a lightning and bitcoin node
-running.  The easiest way to do this is likely through setting up a local
-simnet.  Once you have two entities configured, you can enter their credentials
-in `test/test.ts` and run `node ./build/test/test.js` to see a client request an
-invoice from a server.
 
 ## Lightning Specific Protocols
 
@@ -59,9 +49,9 @@ packet with sub-protocol peeringResponse.
   - lndIdentityPubkey: lightning identity pubkey
 
 The client then parses the data from this packet and store the server's
-identity public key for reference in the future. Peering requests are 
+identity public key for reference in the future. Peering requests are
 automatically accepted over lightning. The client does NOT need to perform any
-lightning level functionality upon receipt of this packet. 
+lightning level functionality upon receipt of this packet.
 
 ### Invoice Protocol
 When a plugin instance wishes to settle with a counterparty, they must request
@@ -69,38 +59,25 @@ an invoice before they can make a payment.
 
 #### invoiceRequest
 - Type: `BTP.MESSAGE`
-- Data: 
+- Data:
   - amount: amount plugin wishes to pay counterparty
 
-Upon receipt of a `BTP.MESSAGE` packet containing the sub-protocol `invoiceRequest` 
+Upon receipt of a `BTP.MESSAGE` packet containing the sub-protocol `invoiceRequest`
 a plugin will create an invoice for the requested amount, and send back a
 `BTP.MESSAGE` containing the sub-protocol `invoiceResponse`.
 
 #### invoiceResponse
 - Type: `BTP.MESSAGE`
-- Data: 
+- Data:
   - paymentRequest: a payment request which can be decoded into an invoice
 
 Upon receipt of a `BTP.MESSAGE` packet containing the sub-protocol
 `invoiceResponse` the plugin will perform the following steps:
 
 1. Decode the payment request to an invoice
-2. Validate the invoice amount and destination are as expected
+2. Validate the invoice destination is as expected
 3. Fulfill the invoice
 4. Update their balance
-5. Respond with `BTP.MESSAGE` containing the sub-protocol `invoiceFulfill` 
-
-#### invoiceFulfill
-- Type: `BTP.TRANSFER`
-- Data:
-  - paymentRequest: a payment request to identify the sent invoice
-
-Upon receipt of a `BTP.TRANSFER` packet containing the sub-protocol
-`invoiceFulfill` the plugin will:
-
-1. Check their lightning daemon to ensure the specified invoice was actually
-   fulfilled
-2. Update their balance with the counterparty
 
 ## API
 
@@ -115,19 +92,19 @@ Upon receipt of a `BTP.TRANSFER` packet containing the sub-protocol
 - Format: `host:port`
 - Communication host used to communicate with local lightning daemon
 
-### `lndPeeringHost`
+### `lndHost`
 - **Required**
 - Type: `string`
-- Format: `host:port`
-- Peering host used to listen for p2p communication
+- Format: `host[:port]`
+- Peering host used to listen for p2p communication. If the port is not included, the default port for peering of lnd will be used.
 
-### `macaroonPath`
+### `macaroonInput`
 - Type: `string`
-- Path to the `admin.macaroon` used to authenticate lightning daemon requests
+- Path to the `admin.macaroon` used to authenticate lightning daemon requests OR base64 encoded string of the `admin.macaroon` file used to authenticate lightning daemon requests.
 
-### `tlsCertPath`
+### `tlsCertInput`
 - Type: `string`
-- Path to`tls.cert` 
+- Path to`tls.cert` used to authenticate connects to the lightning daemon OR base64 encoded string of the `tls.cert` file used to authenticate lightning daemon requests.
 
 ### `role`
 - Type:
@@ -157,8 +134,7 @@ Upon receipt of a `BTP.TRANSFER` packet containing the sub-protocol
 #### `maximum`
 - Type: [`BigNumber`](http://mikemcl.github.io/bignumber.js/), `number`, or `string`
 - Default: `Infinity`
-- Maximum balance the counterparty can owe this instance before further packets
-  are rejected
+- Maximum balance the counterparty can owe this instance before further packets are rejected
 
 #### `settleTo`
 - Type: [`BigNumber`](http://mikemcl.github.io/bignumber.js/), `number`, or `string`
