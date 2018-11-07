@@ -1,53 +1,105 @@
 const grpc = require('grpc')
-const fs = require('fs')
-const process = require('process')
+import * as fs from 'fs'
 const path = require('path')
+const isBase64 = require('is-base64')
 const protoLoader = require('@grpc/proto-loader')
-const promisify = require('util').promisify
 import BigNumber from 'bignumber.js'
 
 process.env.GRPC_SSL_CIPHER_SUITES = 'HIGH+ECDSA'
 
-const sleep = require('util').promisify(setTimeout)
+export interface LndLibOpts {
+  tlsCertInput: string,
+  macaroonInput: string,
+  lndHost: string,
+  grpcPort?: string,
+  protoPath?: string
+}
 
 export default class LndLib {
 
   private lightning: any
   private connected: boolean
-  private readonly tlsCertPath: string
-  private readonly macaroonPath: string
+  private readonly tlsCert: Buffer
+  private readonly macaroon: string
   private readonly lndHost: string
+  private readonly grpcPort: string
   private readonly protoPath: string
-  constructor(opts: any) {
+  constructor(opts: LndLibOpts) {
     // First lnd query connects to lnd
     this.connected = false
-    this.tlsCertPath = opts.tlsCertPath
-    this.macaroonPath = opts.macaroonPath
+    if (isBase64(opts.tlsCertInput)) {
+      this.tlsCert = Buffer.from(opts.tlsCertInput, 'base64')
+    } else if (fs.existsSync(opts.tlsCertInput)) {
+      this.tlsCert = fs.readFileSync(opts.tlsCertInput)
+    } else {
+      throw new Error('TLS Cert is not a valid file or base64 string.')
+    }
+    if (isBase64(opts.macaroonInput)) {
+      this.macaroon =
+        Buffer.from(opts.macaroonInput, 'base64').toString('hex')
+    } else if (fs.existsSync(opts.macaroonInput)) {
+      this.macaroon =
+        fs.readFileSync(opts.macaroonInput).toString('hex')
+    } else {
+      throw new Error('Macaroon is not a valid file or base64 string.')
+    }
     this.lndHost = opts.lndHost
-    this.protoPath = './src/utils/rpc.proto'
+    this.grpcPort = opts.grpcPort || '10009'
+    this.protoPath = opts.protoPath || path.resolve(__dirname, 'rpc.proto')
   }
 
-  public async addInvoice(amt: number): Promise < any  > {
-    return await this._lndQuery('addInvoice', { value : amt })
+  public async addInvoice(): Promise < any  > {
+    return await this._lndQuery('addInvoice', {})
+  }
+
+  public async subscribeToInvoices(): Promise<any> {
+    if (!this.connected) {
+      await this.connect()
+    }
+    const invoices = this.lightning.subscribeInvoices({})
+    return invoices
   }
 
   public async decodePayReq(paymentRequest: string): Promise < any > {
     return await this._lndQuery('decodePayReq', { pay_req : paymentRequest })
   }
 
-  public async payInvoice(paymentRequest: string): Promise < void > {
-    const opts = { payment_request: paymentRequest }
+  public async queryRoutes(
+    pubKey: string,
+    amount: string | number | BigNumber,
+    numRoutes: string | number | BigNumber = 10): Promise <any> {
+    if (!this.connected) {
+      await this.connect()
+    }
+    const opts = {
+      pub_key: pubKey,
+      amt: amount.toString(),
+      num_routes: numRoutes.toString()
+    }
+    return await this._lndQuery('QueryRoutes', opts)
+  }
+
+  public async payInvoice(
+    paymentRequest: string,
+    amt: BigNumber
+  ): Promise < void > {
+    const opts = { payment_request: paymentRequest, amt: amt.toNumber() }
     const resp = await this._lndQuery('sendPaymentSync', opts)
     const error = resp.payment_error
     // TODO find other payment_error types and implement handling for them
     if (error === 'invoice is already paid') {
       throw new Error('Attempted to pay invoice that has already been paid.')
-    }
+      } else if (error === 'unable to find a path to destination') {
+        throw new Error('Unable to find route for payment.')
+      }
+    if (!!error) {
+      throw new Error(`Error attempting to send payment: ${error}`)
+      }
     return resp.payment_preimage
   }
 
   public invoiceAmount(invoice: any): BigNumber {
-    return invoice.value
+    return new BigNumber(invoice.amt_paid_sat)
   }
 
   public isFulfilledInvoice(invoice: any): boolean {
@@ -76,9 +128,9 @@ export default class LndLib {
     return (await this._lndQuery('listPeers', {})).peers
   }
 
-  // checks if some channel exists with sufficient funds
   public async hasAmount(amt: BigNumber): Promise < boolean > {
-    return (await this._getMaxChannelBalance()) > amt
+    const spendableBalnce = await this._getMaxSpendableBalance()
+    return  new BigNumber(spendableBalnce).gt(amt)
   }
 
   public async getChannels(): Promise < any[] > {
@@ -89,7 +141,7 @@ export default class LndLib {
 
   public async connect() {
     // get tls certificate
-    const lndCert = await this._getTlsCert()
+    const lndCert = this.tlsCert
     // macaroon credentials
     const macaroonCreds = await this._getMacaroonCreds()
     // combine credentials for lnrpc
@@ -98,7 +150,8 @@ export default class LndLib {
       grpc.credentials.combineChannelCredentials(tlsCreds, macaroonCreds)
     // create lightning instance
     const lnrpc = await this._loadDescriptor(this.protoPath)
-    this.lightning = new lnrpc.Lightning(this.lndHost, combinedCredentials)
+    this.lightning =
+    new lnrpc.Lightning(this.lndHost + ':' + this.grpcPort, combinedCredentials)
     this.connected = true
   }
 
@@ -109,19 +162,14 @@ export default class LndLib {
       await this.connect()
     }
     // execute lnd request
-    try {
-      const result = await new Promise((resolve, reject) => {
-        this.lightning[methodName](options, (err: Error, response: any) => {
-          if (err) {
-            return reject(err)
-          }
-          resolve(response)
-        })
+    return new Promise((resolve, reject) => {
+      this.lightning[methodName](options, (err: Error, response: any) => {
+        if (err) {
+          reject(err)
+        }
+        resolve(response)
       })
-      return result
-    } catch (e) {
-      throw e
-    }
+    })
   }
 
   private async getInfo(): Promise < any > {
@@ -129,13 +177,20 @@ export default class LndLib {
   }
 
   private async _listInvoices(): Promise < any > {
-    return (await this._lndQuery('listInvoices', {})).invoices
+    const opts = {
+      reversed: true
+    }
+    return (await this._lndQuery('listInvoices', opts)).invoices
   }
 
-  private async _getMaxChannelBalance(): Promise < any > {
+  private async _getMaxSpendableBalance(): Promise < any > {
     const channels = await this.getChannels()
-    const maxChannel = Math.max(...(channels.map((c) => c.local_balance)))
-    return maxChannel
+    const maxSpendableAmount = channels
+      .filter((c) => !!c.local_balance)
+      .map((c) => (c.local_balance - (c.capacity * 0.01)))
+      .reduce((acc, cur) => Math.max(acc, cur), 0)
+
+    return maxSpendableAmount
   }
 
   // load gRPC descriptor from rpc.proto file
@@ -152,59 +207,17 @@ export default class LndLib {
     return lnrpcDescriptor.lnrpc
   }
 
-  // if user didn't pass in tls cert path, get default os location
-  private async _getTlsCert(): Promise < string > {
-    const certPath: string = this.tlsCertPath || ((os) => {
-      switch (os) {
-        case 'darwin':
-          return `${process.env.HOME}/Library/Application Support/Lnd/tls.cert`
-        case 'linux':
-          return `${process.env.HOME}/.lnd/tls.cert`
-          // TODO unsure of path for windows, giving it same path as linux
-        case 'win32':
-          return `${process.env.HOME}/.lnd/tls.cert`
-        default:
-          throw new Error(`lnd tls.cert path the OS does not match mac, ` +
-            `linux or windows.`)
-      }
-    })(process.platform)
-    // try to access file in certPath, and throw error if file does not exist
-    try {
-      return fs.readFileSync(certPath)
-    } catch (e) {
-      throw new Error('tls.cert does not exist in default location for this OS')
-    }
-  }
-
   // if user didn't pass in macaroon path, get default os location
   private async _getMacaroonCreds(): Promise < any > {
-    const macaroonPath: string = this.macaroonPath || ((os) => {
-      switch (os) {
-        case 'darwin':
-          return `${process.env.HOME}/Library/Application Support/` +
-            `Lnd/admin.macaroon`
-        case 'linux':
-          return `${process.env.HOME}/.lnd/admin.macaroon`
-          // TODO unsure of path for windows, giving it same path as linux
-        case 'win32':
-          return `${process.env.HOME}/.lnd/admin.macaroon`
-        default:
-          throw new Error(`Query for macaroonPath failed because OS does ` +
-            `not match mac, linux or windows.`)
-      }
-    })(process.platform)
-
     // use path to query file and create the gRPC credentials object
     try {
-      const macaroon = fs.readFileSync(macaroonPath).toString('hex')
       const metadata = new grpc.Metadata()
-      metadata.add('macaroon', macaroon)
+      metadata.add('macaroon', this.macaroon)
       const macaroonCreds = grpc.credentials.createFromMetadataGenerator(
         (_args: any, callback: any) => callback(null, metadata))
       return macaroonCreds
     } catch (err) {
-      throw new Error(`admin.macaroon does not exist in default location ` +
-        `for this OS: ${err.message}`)
+      throw new Error(`Macaroon is not properly formatted ${err.message}`)
     }
   }
 }

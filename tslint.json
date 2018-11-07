@@ -29,6 +29,7 @@
     "variable-name": [
       true,
       "ban-keywords",
+      "allow-pascal-case",
       "check-format",
       "allow-leading-underscore"
     ],
