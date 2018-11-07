@@ -1,40 +1,83 @@
 {
-  "name": "ilp-plugin-lnd-asym-server",
-  "version": "0.3.2",
-  "description": "Interledger.js BTP Server Plugin for the Lightning Network",
-  "main": "src/plugin.js",
+  "name": "ilp-plugin-lightning",
+  "version": "1.0.0-beta.11",
+  "description": "Settle interledger payments using Lightning Network",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "files": [
+    "build/**/*"
+  ],
+  "publishConfig": {
+    "tag": "latest"
+  },
   "scripts": {
-    "test": "mocha test/*",
-    "lint": "standard src/*.js"
+    "test": "nyc ava",
+    "lint": "tslint --project .",
+    "build": "tsc --project .",
+    "buildWatch": "tsc --watch --project .",
+    "testWatch": "jest --detectOpenHandles --watch",
+    "copy": "cp src/utils/rpc.proto build/utils/rpc.proto"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/interledgerjs/ilp-plugin-lightning.git"
+  },
+  "bugs": {
+    "url": "https://github.com/interledgerjs/ilp-plugin-lightning/issues"
   },
   "keywords": [
     "interledger",
     "ilp",
+    "streaming",
+    "payments",
     "lightning",
-    "lnd",
-    "bitcoin"
+    "lightning-network"
   ],
-  "author": "Evan Schwartz <evan@ripple.com>",
+  "contributors": [
+    "Kevin Davis <kevin@kava.io>",
+    "Austin King <austin@stratalabs.io>"
+  ],
   "license": "Apache-2.0",
   "dependencies": {
-    "bignumber.js": "^4.0.2",
+    "@grpc/proto-loader": "^0.3.0",
+    "@types/debug": "0.0.30",
+    "bignumber.js": "^7.2.1",
     "btp-packet": "^1.2.0",
-    "debug": "^2.6.8",
-    "grpc": "^1.3.7",
-    "ilp-plugin-mini-accounts": "^3.4.0",
-    "ilp-plugin-shared": "https://github.com/interledgerjs/ilp-plugin-shared.git",
-    "int64-buffer": "^0.1.9",
-    "text-encoding": "^0.6.4"
+    "cp": "^0.2.0",
+    "debug": "^3.1.0",
+    "eventemitter2": "^5.0.1",
+    "grpc": "^1.14.2",
+    "ilp-logger": "^1.0.2",
+    "ilp-plugin-btp": "^1.3.3",
+    "ilp-plugin-mini-accounts": "github:interledgerjs/ilp-plugin-mini-accounts#ko-ts-fixes",
+    "ilp-store-memory": "^1.0.0",
+    "is-base64": "0.0.6"
   },
   "devDependencies": {
-    "chai": "^4.1.2",
-    "ilp-protocol-ildcp": "^1.0.0",
-    "koa": "^2.2.0",
-    "koa-bodyparser": "^4.2.0",
-    "koa-router": "^7.2.0",
-    "mocha": "^5.0.1",
-    "moment": "^2.19.3",
-    "standard": "^11.0.0",
-    "uuid": "^3.0.1"
+    "@types/get-port": "^4.0.0",
+    "@types/jest": "^23.3.1",
+    "ava": "github:avajs/ava",
+    "get-port": "^4.0.0",
+    "ilp-protocol-stream": "github:interledgerjs/ilp-protocol-stream#ko-receive-only-tests",
+    "jest": "^23.5.0",
+    "nyc": "^13.0.1",
+    "ts-jest": "^23.1.4",
+    "ts-node": "^7.0.1",
+    "tslint": "^5.11.0",
+    "typescript": "^3.1.1"
+  },
+  "jest": {
+    "transform": {
+      "^.+\\.tsx?$": "ts-jest"
+    },
+    "testRegex": "(/__tests__/.*|(\\.|/)(test|spec))\\.(jsx?|tsx?)$",
+    "moduleFileExtensions": [
+      "ts",
+      "tsx",
+      "js",
+      "jsx",
+      "json",
+      "node"
+    ]
   }
 }
