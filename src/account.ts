@@ -10,7 +10,7 @@ import {
 
 import {
   ilpAndCustomToProtocolData
-} from 'ilp-plugin-btp/src/protocol-data-converter'
+} from 'ilp-plugin-btp/build/protocol-data-converter'
 
 import BigNumber from 'bignumber.js'
 import { randomBytes } from 'crypto'
@@ -53,7 +53,7 @@ export default class LightningAccount {
     balance: BigNumber
     lndIdentityPubkey?: string
     payoutAmount: BigNumber
-    invoices: Set<string>
+    invoices: any
   }
   // used to send BTP packets to counterparty
   private sendMessage: (message: BtpPacket) => Promise<BtpPacketData>
@@ -94,15 +94,21 @@ export default class LightningAccount {
     if (typeof savedAccount.payoutAmount === 'string') {
       savedAccount.payoutAmount = new BigNumber(savedAccount.payoutAmount)
     }
-    // load account class variable
+    if (savedAccount.invoices instanceof Array) {
+      savedAccount.invoices = new Set(savedAccount.invoices)
+    }
     this.account = new Proxy({
       ...this.account,
       ...savedAccount
     }, {
         set: (account, key, val) => {
-          this.master._store.set(accountKey, JSON.stringify({
+          const newAccount = {
             ...account,
             [key]: val
+          }
+          this.master._store.set(accountKey, JSON.stringify({
+            ...newAccount,
+            invoices: Array.from(newAccount.invoices)
           }))
           return Reflect.set(account, key, val)
         }
