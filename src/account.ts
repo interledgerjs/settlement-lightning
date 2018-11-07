@@ -10,7 +10,7 @@ import {
 
 import {
   ilpAndCustomToProtocolData
-} from 'ilp-plugin-btp/build/protocol-data-converter'
+} from 'ilp-plugin-btp/src/protocol-data-converter'
 
 import BigNumber from 'bignumber.js'
 import { randomBytes } from 'crypto'
