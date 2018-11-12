@@ -50,8 +50,7 @@
     "ilp-logger": "^1.0.2",
     "ilp-plugin-btp": "^1.3.3",
     "ilp-plugin-mini-accounts": "github:interledgerjs/ilp-plugin-mini-accounts#ko-ts-fixes",
-    "ilp-store-memory": "^1.0.0",
-    "is-base64": "0.0.6"
+    "ilp-store-memory": "^1.0.0"
   },
   "devDependencies": {
     "@types/get-port": "^4.0.0",
