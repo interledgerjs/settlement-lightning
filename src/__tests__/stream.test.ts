@@ -92,7 +92,7 @@ test('client streams data and money to server', async (t: any) => {
       serverConn = conn
 
       serverConn.once('stream', (stream: IlpStream.DataAndMoneyStream) => {
-        stream.setReceiveMax(Infinity)
+        stream.setReceiveMax(AMOUNT_TO_SEND)
         serverStream = stream
 
         resolve()
