@@ -12,7 +12,7 @@
 
 ## Description
 
-** Still under development, use small amounts of money **
+**Still under development, use small amounts of money**
 
 This is a plugin that integrates [Lightning](https://lightning.network/)
 to the Interledger network.  Using this plugin, one will be able to
