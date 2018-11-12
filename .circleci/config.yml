@@ -83,6 +83,9 @@ jobs:
           name: Authenticate with registry
           command: echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/repo/.npmrc
       - run:
+          name: Remove latest tag
+          command: npm dist-tag rm ilp-plugin-lightning next
+      - run:
           name: Publish package
           command: npm publish
 
