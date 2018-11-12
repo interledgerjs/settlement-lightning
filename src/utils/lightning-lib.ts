@@ -1,7 +1,6 @@
 const grpc = require('grpc')
 import * as fs from 'fs'
 const path = require('path')
-const isBase64 = require('is-base64')
 const protoLoader = require('@grpc/proto-loader')
 import BigNumber from 'bignumber.js'
 
@@ -27,19 +26,17 @@ export default class LndLib {
   constructor(opts: LndLibOpts) {
     // First lnd query connects to lnd
     this.connected = false
-    if (isBase64(opts.tlsCertInput)) {
-      this.tlsCert = Buffer.from(opts.tlsCertInput, 'base64')
-    } else if (fs.existsSync(opts.tlsCertInput)) {
+    if (fs.existsSync(opts.tlsCertInput)) {
       this.tlsCert = fs.readFileSync(opts.tlsCertInput)
+    } else if (typeof opts.tlsCertInput === 'string') {
+      this.tlsCert = Buffer.from(opts.tlsCertInput, 'base64')
     } else {
       throw new Error('TLS Cert is not a valid file or base64 string.')
     }
-    if (isBase64(opts.macaroonInput)) {
-      this.macaroon =
-        Buffer.from(opts.macaroonInput, 'base64').toString('hex')
-    } else if (fs.existsSync(opts.macaroonInput)) {
-      this.macaroon =
-        fs.readFileSync(opts.macaroonInput).toString('hex')
+    if (fs.existsSync(opts.macaroonInput)) {
+      this.macaroon = fs.readFileSync(opts.macaroonInput).toString('hex')
+    } else if (typeof opts.macaroonInput === 'string') {
+      this.macaroon = Buffer.from(opts.macaroonInput, 'base64').toString('hex')
     } else {
       throw new Error('Macaroon is not a valid file or base64 string.')
     }
