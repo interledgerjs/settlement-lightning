@@ -34,7 +34,11 @@ export default class LightningServerPlugin extends MiniAccountsPlugin
   public _handlePrepareResponse = async (
     destination: string,
     responsePacket: IlpPacket.IlpPacket,
-    preparePacket: IlpPacket.IlpPacket
+    preparePacket: {
+      type: IlpPacket.Type.TYPE_ILP_PREPARE,
+      typeString?: 'ilp_prepare',
+      data: IlpPacket.IlpPrepare
+    }
   ): Promise<void> =>
     this._getAccount(destination).handlePrepareResponse(
       preparePacket,

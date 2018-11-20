@@ -286,7 +286,11 @@ export default class LightningAccount {
   }
 
   public handlePrepareResponse(
-    preparePacket: IlpPacket.IlpPacket,
+    preparePacket: {
+      type: IlpPacket.Type.TYPE_ILP_PREPARE,
+      typeString?: 'ilp_prepare',
+      data: IlpPacket.IlpPrepare
+    },
     responsePacket: IlpPacket.IlpPacket
   ): void {
     const isFulfill = responsePacket.type === IlpPacket.Type.TYPE_ILP_FULFILL
@@ -303,7 +307,10 @@ export default class LightningAccount {
         throw new IlpPacket.Errors.InternalError(err.message)
       }
     }
-    if (isFulfill || (isReject && responsePacket.data.code === 'T04')) {
+    const shouldSettle = isFulfill ||
+      (responsePacket.type === IlpPacket.Type.TYPE_ILP_REJECT
+          && responsePacket.data.code === 'T04')
+    if (shouldSettle) {
       this.attemptSettle()
     }
   }
@@ -371,23 +378,8 @@ export default class LightningAccount {
         this.master._log.trace(`Failed to forward PREPARE: ${err.message}`)
         throw new IlpPacket.Errors.InsufficientLiquidityError(err.message)
       }
-      // timeout if ILP.FULFILL packet is not received before expiry
-      let timer: NodeJS.Timer
-      const response: Buffer = await Promise.race([
-        // timeout promise
-        new Promise<Buffer>((resolve) => {
-          timer = setTimeout(() => {
-            resolve(
-              IlpPacket.errorToReject('', {
-                ilpErrorCode: 'R00',
-                message: `Expired at ${new Date().toISOString()}`
-              })
-            )
-          }, expiresAt.getTime() - Date.now())
-        }),
-        dataHandler(ilp.data)
-      ])
-      clearTimeout(timer!)
+
+      const response = await dataHandler(ilp.data)
       if (response[0] === IlpPacket.Type.TYPE_ILP_FULFILL) {
         this.master._log.trace(`Received FULFILL from data handler in ` +
           `response to forwarded PREPARE`)

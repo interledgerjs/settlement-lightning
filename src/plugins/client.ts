@@ -39,6 +39,10 @@ extends BtpPlugin implements PluginInstance {
 
   public async sendData(buffer: Buffer): Promise < Buffer > {
     const preparePacket = IlpPacket.deserializeIlpPacket(buffer)
+    if (preparePacket.type !== IlpPacket.Type.TYPE_ILP_PREPARE) {
+      throw new Error('Packet must be a PREAPRE')
+    }
+
     const response = await this._call('', {
       type: btpPacket.TYPE_MESSAGE,
       requestId: await requestId(),
