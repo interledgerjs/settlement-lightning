@@ -345,9 +345,6 @@ export default class LightningAccount {
   }
 
   public async disconnect() {
-    if (this.master._role === 'client') {
-      await this.attemptSettle()
-    }
     return this.master._store.unload(`${this.account.accountName}:account`)
   }
 
