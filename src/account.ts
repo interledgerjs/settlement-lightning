@@ -8,10 +8,6 @@ import {
   BtpSubProtocol
 } from 'ilp-plugin-btp'
 
-import {
-  ilpAndCustomToProtocolData
-} from 'ilp-plugin-btp/src/protocol-data-converter'
-
 import BigNumber from 'bignumber.js'
 import { randomBytes } from 'crypto'
 import { promisify } from 'util'
@@ -387,11 +383,17 @@ export default class LightningAccount {
       } else {
         this.subBalance(amount)
       }
-      return ilpAndCustomToProtocolData({ ilp: response })
-    } catch (err) {
-      return ilpAndCustomToProtocolData(
-        { ilp: IlpPacket.errorToReject('', err) }
-      )
+      return [{
+        protocolName: 'ilp',
+        contentType: btpPacket.MIME_APPLICATION_OCTET_STREAM,
+        data: response
+      }]
+    }  catch (err) {
+      return [{
+        protocolName: 'ilp',
+        contentType: btpPacket.MIME_APPLICATION_OCTET_STREAM,
+        data: IlpPacket.errorToReject('', err)
+      }]
     }
   }
 
