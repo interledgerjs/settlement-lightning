@@ -13,30 +13,25 @@ jobs:
             - v10-dependencies-{{ checksum "package.json" }}
             # fallback to using the latest cache if no exact match is found
             - v10-dependencies-
-      - run: npm install
+      - run:
+          name: Install dependencies
+          command: npm install
       - save_cache:
           paths:
             - node_modules
           key: v10-dependencies-{{ checksum "package.json" }}
-      # run tests!
-      # - run:
-      #     name: v10 tests
-      #     command: |
-      #         mkdir -p ~/repo/certs/b
-      #         mkdir -p ~/repo/certs/c
-      #         echo "$LND_MACAROON_B_BASE64" | base64 --decode > $LND_MACAROON_B
-      #         echo "$LND_TLSCERT_B_BASE64" | base64 --decode > $LND_TLSCERT_B
-      #         echo "$LND_MACAROON_C_BASE64" | base64 --decode > $LND_MACAROON_C
-      #         echo "$LND_TLSCERT_C_BASE64" | base64 --decode > $LND_TLSCERT_C
-      #         npm test
-      # test
-      - run: npm t
-      # lint
-      - run: npm run lint
-      # build
-      - run: npm run build
-      # upload coverage to codecov.io
-      - run: npx codecov
+      - run:
+          name: Build and compile
+          command: npm run build
+      - run:
+          name: Run tests
+          command: npm test
+      - run:
+          name: Lint files
+          command: npm run lint
+      - run:
+          name: Upload code coverage
+          command: npx codecov
       - persist_to_workspace:
           root: ~/repo
           paths: .
@@ -54,26 +49,22 @@ jobs:
             - v8-dependencies-{{ checksum "package.json" }}
             # fallback to using the latest cache if no exact match is found
             - v8-dependencies-
-      - run: npm install
+      - run:
+          name: Install dependencies
+          command: npm install
       - save_cache:
           paths:
             - node_modules
           key: v8-dependencies-{{ checksum "package.json" }}
-      # # run tests!
-      # - run:
-      #     name: v8 tests
-      #     command: |
-      #       mkdir -p ~/repo/certs/b
-      #       mkdir -p ~/repo/certs/c
-      #       echo "$LND_MACAROON_B_BASE64" | base64 --decode > $LND_MACAROON_B
-      #       echo "$LND_TLSCERT_B_BASE64" | base64 --decode > $LND_TLSCERT_B
-      #       echo "$LND_MACAROON_C_BASE64" | base64 --decode > $LND_MACAROON_C
-      #       echo "$LND_TLSCERT_C_BASE64" | base64 --decode > $LND_TLSCERT_C
-      #       npm test
-      # test
-      - run: npm t
-      # lint
-      - run: npm run lint
+      - run:
+          name: Build and compile
+          command: npm run build
+      - run:
+          name: Run tests
+          command: npm test
+      - run:
+          name: Lint files
+          command: npm run lint
 
   publish:
     docker:
