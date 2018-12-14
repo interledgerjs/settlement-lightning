@@ -4,7 +4,27 @@ export interface Store {
   del: (key: string) => Promise<void>
 }
 
-export default class StoreWrapper {
+export class MemoryStore implements Store {
+  private _store: Map<string, string>
+
+  constructor () {
+    this._store = new Map()
+  }
+
+  async get (k: string) {
+    return this._store.get(k)
+  }
+
+  async put (k: string, v: string) {
+    this._store.set(k, v)
+  }
+
+  async del (k: string) {
+    this._store.delete(k)
+  }
+}
+
+export class StoreWrapper {
   private _store?: Store
   private _cache: Map<string, string | void | object>
   private _write: Promise<void>
@@ -15,8 +35,12 @@ export default class StoreWrapper {
     this._write = Promise.resolve()
   }
 
-  public async load(key: string) { return this._load(key, false) }
-  public async loadObject(key: string) { return this._load(key, true) }
+  public async load(key: string) {
+    return this._load(key, false)
+  }
+  public async loadObject(key: string) {
+    return this._load(key, true)
+  }
 
   public unload(key: string) {
     if (this._cache.has(key)) {
@@ -63,7 +87,9 @@ export default class StoreWrapper {
     this._cache.set(key, value)
   }
 
-  public close(): Promise<void> { return this._write }
+  public close(): Promise<void> {
+    return this._write
+  }
 
   private async _load(key: string, parse: boolean) {
     if (!this._store) {
@@ -75,7 +101,7 @@ export default class StoreWrapper {
     const value = await this._store.get(key)
     // once the call returns, double-check that the cache is still empty.
     if (!this._cache.has(key)) {
-      this._cache.set(key, (parse && value) ? JSON.parse(value) : value)
+      this._cache.set(key, parse && value ? JSON.parse(value) : value)
     }
   }
 }

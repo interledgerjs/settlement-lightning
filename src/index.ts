@@ -1,10 +1,8 @@
 import BigNumber from 'bignumber.js'
-import * as debug from 'debug'
+import debug from 'debug'
 import { EventEmitter2 } from 'eventemitter2'
-import { EventEmitter } from 'events'
 import createLogger from 'ilp-logger'
-import StoreWrapper from './utils/store-wrapper'
-const MemoryStore = require('ilp-store-memory')
+import { StoreWrapper, MemoryStore } from './utils/store'
 
 import {
   DataHandler,
@@ -14,23 +12,22 @@ import {
   PluginServices
 } from './utils/types'
 
-import {
-  Store
-} from 'ilp-plugin-mini-accounts/src/types'
-
+import { registerProtocolNames } from 'btp-packet'
 import LightningClientPlugin from './plugins/client'
 import LightningServerPlugin from './plugins/server'
-import LightningLib, { LndLibOpts } from './utils/lightning-lib'
+import { connectLnd, LightningService, LndOpts } from './utils/lightning'
+
+registerProtocolNames(['peeringRequest', 'invoices'])
 
 interface LightningPluginOpts {
   // directs whether master plugin behaves as client or server
   role: 'client' | 'server'
   // tracks credit relationship with counterparty
   balance?: {
-    minimum?: BigNumber.Value;
-    maximum?: BigNumber.Value;
-    settleTo?: BigNumber.Value;
-    settleThreshold?: BigNumber.Value;
+    minimum?: BigNumber.Value
+    maximum?: BigNumber.Value
+    settleTo?: BigNumber.Value
+    settleThreshold?: BigNumber.Value
   }
   // This version only implements Lightning, not BTC directly
   lndIdentityPubkey: string
@@ -39,29 +36,26 @@ interface LightningPluginOpts {
   // max satoshis permitted in each packet
   peerPort?: string
   maxPacketAmount?: BigNumber.Value
-  settleOnConnect?: boolean
   // lib for calls to lightning daemon
-  lnd: LndLibOpts
-  subscription: EventEmitter
+  lnd: LndOpts
 }
 
 export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
   public static readonly version = 2
-  public readonly lnd: LightningLib
-  public subscription: any
+  public lightning: LightningService
+  public readonly lndOpts: LndOpts
   public readonly _lndIdentityPubkey: string
   public readonly _lndHost: string
   public readonly _peerPort: string
-  public readonly _settleOnConnect: boolean
   public readonly _log: Logger
   public readonly _store: StoreWrapper
   public readonly _role: 'client' | 'server'
   public readonly _maxPacketAmount: BigNumber
   public readonly _balance: {
-    minimum: BigNumber;
-    maximum: BigNumber;
-    settleTo: BigNumber;
-    settleThreshold?: BigNumber;
+    minimum: BigNumber
+    maximum: BigNumber
+    settleTo: BigNumber
+    settleThreshold: BigNumber
   }
   private readonly _plugin: LightningServerPlugin | LightningClientPlugin
 
@@ -71,97 +65,100 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
       lndIdentityPubkey,
       lndHost,
       peerPort = '9735',
-      settleOnConnect = role === 'client',
       maxPacketAmount = Infinity,
       balance: {
         maximum = Infinity,
         settleTo = 0,
-        // tslint:disable-next-line:no-unnecessary-initializer
-        settleThreshold = undefined,
+        settleThreshold = -Infinity,
         minimum = -Infinity
       } = {},
+      lnd,
       ...opts
     }: LightningPluginOpts,
-    {
-      log,
-      store = new MemoryStore()
-    }: PluginServices = {}
+    { log, store = new MemoryStore() }: PluginServices = {}
   ) {
     super()
-    // unable to peer to counterparty without these credentials
+
+    // tslint:disable-next-line:strict-type-predicates
     if (typeof lndIdentityPubkey !== 'string') {
       throw new Error(`Lightning identity pubkey required`)
     }
+
+    // tslint:disable-next-line:strict-type-predicates
     if (typeof lndHost !== 'string') {
       throw new Error(`Lightning peering host required`)
     }
 
-    this._role = role
-    this._store = new StoreWrapper(store)
-    this._maxPacketAmount = new BigNumber(maxPacketAmount)
-      .abs()
-      .dp(0, BigNumber.ROUND_DOWN)
-    // logging tools
-    this._log = log || createLogger(`ilp-plugin-lightning-${this._role}`)
-    this._log.trace =
-      this._log.trace || debug(`ilp-plugin-lnd-${this._role}:trace`)
-    // lightning peering credentials
     this._lndIdentityPubkey = lndIdentityPubkey
     this._lndHost = lndHost
     this._peerPort = peerPort
-    this._settleOnConnect = settleOnConnect
-    this.lnd = new LightningLib(opts.lnd)
+    this.lndOpts = lnd
+
+    this._store = new StoreWrapper(store)
+
+    this._log = log || createLogger(`ilp-plugin-lightning-${role}`)
+    this._log.trace =
+      this._log.trace || debug(`ilp-plugin-lightning-${role}:trace`)
+
+    this._maxPacketAmount = new BigNumber(maxPacketAmount)
+      .abs()
+      .dp(0, BigNumber.ROUND_DOWN)
+
     this._balance = {
-      minimum: new BigNumber(minimum).dp(0, BigNumber.ROUND_FLOOR),
       maximum: new BigNumber(maximum).dp(0, BigNumber.ROUND_FLOOR),
       settleTo: new BigNumber(settleTo).dp(0, BigNumber.ROUND_FLOOR),
-      settleThreshold: settleThreshold
-        ? new BigNumber(settleThreshold).dp(0, BigNumber.ROUND_FLOOR)
-        : undefined
-    }
-    if (this._balance.settleThreshold) {
-      if (!this._balance.maximum.gte(this._balance.settleTo)) {
-        throw new Error(
-          `Invalid balance configuration: ` +
-            `maximum balance must be greater than or equal to settleTo`
-        )
-      }
-      if (!this._balance.settleTo.gte(this._balance.settleThreshold)) {
-        throw new Error(
-          `Invalid balance configuration: ` +
-            `settleTo mustbe greater than or equal to settleThreshold`
-        )
-      }
-      if (!this._balance.settleThreshold.gte(this._balance.minimum)) {
-        throw new Error(
-          `Invalid balance configuration: ` +
-            `must be greater than or equal to minimum balance`
-        )
-      }
-    } else {
-      if (!this._balance.maximum.gt(this._balance.minimum)) {
-        throw new Error(
-          `Invalid balance configuration: ` +
-            `maximum balance must be greater than minimum balance`
-        )
-      }
+      settleThreshold: new BigNumber(settleThreshold).dp(
+        0,
+        BigNumber.ROUND_FLOOR
+      ),
+      minimum: new BigNumber(minimum).dp(0, BigNumber.ROUND_CEIL)
     }
 
-    // create server or client plugin
-    const internalPlugin =
-      this._role === 'client' ? LightningClientPlugin : LightningServerPlugin
-    this._plugin = new internalPlugin({
-      ...opts,
-      master: this
-    }, { store, log })
+    if (this._balance.settleThreshold.eq(this._balance.minimum)) {
+      this._log.trace(
+        `Auto-settlement disabled: plugin is in receive-only mode`
+      )
+    }
+
+    // Validate balance configuration: max >= settleTo >= settleThreshold >= min
+    if (!this._balance.maximum.gte(this._balance.settleTo)) {
+      throw new Error(
+        'Invalid balance configuration: maximum balance must be greater than or equal to settleTo'
+      )
+    }
+    if (!this._balance.settleTo.gte(this._balance.settleThreshold)) {
+      throw new Error(
+        'Invalid balance configuration: settleTo must be greater than or equal to settleThreshold'
+      )
+    }
+    if (!this._balance.settleThreshold.gte(this._balance.minimum)) {
+      throw new Error(
+        'Invalid balance configuration: settleThreshold must be greater than or equal to minimum'
+      )
+    }
+    if (!this._balance.maximum.gt(this._balance.minimum)) {
+      throw new Error(
+        'Invalid balance configuration: maximum balance must be greater than minimum balance'
+      )
+    }
+
+    const InternalPlugin =
+      role === 'client' ? LightningClientPlugin : LightningServerPlugin
+    this._plugin = new InternalPlugin(
+      {
+        ...opts,
+        master: this
+      },
+      { store, log }
+    )
 
     this._plugin.on('connect', () => this.emitAsync('connect'))
     this._plugin.on('disconnect', () => this.emitAsync('disconnect'))
-    this._plugin.on('error', (e) => this.emitAsync('error', e))
+    this._plugin.on('error', e => this.emitAsync('error', e))
   }
 
   public async connect() {
-    this.subscription = await this.lnd.subscribeToInvoices()
+    this.lightning = await connectLnd(this.lndOpts)
     return this._plugin.connect()
   }
 
@@ -178,10 +175,9 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     return this._plugin.sendData(data)
   }
 
-  public async sendMoney(amount: string) {
+  public async sendMoney() {
     this._log.error(
-      `sendMoney is not supported: use plugin balance ` +
-        `configuration instead of connector balance for settlement`
+      `sendMoney is not supported: use plugin balance configuration`
     )
   }
 

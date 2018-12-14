@@ -1,6 +1,6 @@
 # ilp-plugin-lightning
 
-[![NPM Package](https://img.shields.io/npm/v/ilp-plugin-lightning/latest.svg?style=flat)](https://npmjs.org/package/ilp-plugin-lightning)
+[![NPM Package](https://img.shields.io/npm/v/ilp-plugin-lightning.svg?style=flat)](https://npmjs.org/package/ilp-plugin-lightning)
 [![CircleCI](https://img.shields.io/circleci/project/github/interledgerjs/ilp-plugin-lightning.svg)](https://circleci.com/gh/interledgerjs/ilp-plugin-lightning)
 [![Codecov](https://img.shields.io/codecov/c/github/interledgerjs/ilp-plugin-lightning.svg)](https://codecov.io/gh/interledgerjs/ilp-plugin-lightning)
 [![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)

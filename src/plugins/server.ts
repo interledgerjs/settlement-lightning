@@ -21,22 +21,24 @@ export default class LightningServerPlugin extends MiniAccountsPlugin
     this._accounts = new Map()
   }
 
-  public _connect(address: string, message: BtpPacket): Promise<void> {
+  public _connect(address: string): Promise<void> {
     return this._getAccount(address).connect()
   }
 
   public _handleCustomData = async (
     from: string,
     message: BtpPacket
-  ): Promise<BtpSubProtocol[]> =>
-    this._getAccount(from).handleData(message, this._dataHandler)
+  ): Promise<BtpSubProtocol[]> => {
+    this._getAccount(from).emit('connected')
+    return this._getAccount(from).handleData(message, this._dataHandler!)
+  }
 
   public _handlePrepareResponse = async (
     destination: string,
     responsePacket: IlpPacket.IlpPacket,
     preparePacket: {
-      type: IlpPacket.Type.TYPE_ILP_PREPARE,
-      typeString?: 'ilp_prepare',
+      type: IlpPacket.Type.TYPE_ILP_PREPARE
+      typeString?: 'ilp_prepare'
       data: IlpPacket.IlpPrepare
     }
   ): Promise<void> =>
@@ -59,7 +61,7 @@ export default class LightningServerPlugin extends MiniAccountsPlugin
       account = new LightningAccount({
         accountName,
         master: this._master,
-        moneyHandler: async (amount) => {
+        moneyHandler: async amount => {
           if (this._moneyHandler) {
             return this._moneyHandler(amount)
           }
