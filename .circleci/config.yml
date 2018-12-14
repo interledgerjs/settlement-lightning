@@ -29,6 +29,8 @@ jobs:
       #         echo "$LND_MACAROON_C_BASE64" | base64 --decode > $LND_MACAROON_C
       #         echo "$LND_TLSCERT_C_BASE64" | base64 --decode > $LND_TLSCERT_C
       #         npm test
+      # test
+      - run: npm t
       # lint
       - run: npm run lint
       # build
@@ -68,6 +70,8 @@ jobs:
       #       echo "$LND_MACAROON_C_BASE64" | base64 --decode > $LND_MACAROON_C
       #       echo "$LND_TLSCERT_C_BASE64" | base64 --decode > $LND_TLSCERT_C
       #       npm test
+      # test
+      - run: npm t
       # lint
       - run: npm run lint
 
