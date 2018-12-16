@@ -1,4 +1,4 @@
-import LightningPlugin = require('..')
+import LightningPlugin from '..'
 
 import MiniAccountsPlugin from 'ilp-plugin-mini-accounts'
 

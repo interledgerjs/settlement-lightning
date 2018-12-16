@@ -1,4 +1,4 @@
-import LightningPlugin = require('.')
+import LightningPlugin from '.'
 
 import {
   MIME_APPLICATION_JSON,
