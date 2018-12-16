@@ -1,21 +1,16 @@
 {
-  "compileOnSave": true,
   "compilerOptions": {
-    "rootDir": "./src",
-    "outDir": "./build",
+    "baseUrl": "src",
+    "rootDir": "src",
+    "outDir": "build",
     "target": "es2017",
     "module": "commonjs",
-    "sourceMap": true,
-    "inlineSources": true,
-    "declaration": true,
-    "noImplicitAny": true,
-    "removeComments": true,
     "moduleResolution": "node",
-    "strictNullChecks": true,
-    "suppressImplicitAnyIndexErrors": true,
-    "alwaysStrict": true,
-    "resolveJsonModule": true,
-    "esModuleInterop": true
-  },
-  "include": ["src/**/*"]
+    "sourceMap": true,
+    "declaration": true,
+    "removeComments": true,
+    "strict": true /* Enable all strict type-checking options. */,
+    "esModuleInterop": true,
+    "typeRoots": ["node_modules/@types", "src/types"]
+  }
 }

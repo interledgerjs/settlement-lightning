@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsc",
     "prepare": "node generate.js",
-    "test": "TS_NODE_FILES=true nyc ava",
+    "test": "nyc ava",
     "lint": "tslint --fix --project .",
     "fix": "run-s format lint",
     "format": "prettier --write 'src/**/*.ts'"
@@ -59,11 +59,11 @@
     "@types/google-protobuf": "^3.2.7",
     "@types/node": "^10.12.14",
     "@types/protobufjs": "^6.0.0",
-    "ava": "^1.0.0-rc.2",
+    "ava": "^1.0.1",
     "execa": "^1.0.0",
     "get-port": "^4.0.0",
     "grpc-tools": "^1.6.6",
-    "grpc_tools_node_protoc_ts": "^2.4.1",
+    "grpc_tools_node_protoc_ts": "^2.4.2",
     "ilp-protocol-stream": "github:interledgerjs/ilp-protocol-stream#ko-receive-only-tests",
     "npm-run-all": "^4.1.5",
     "nyc": "^13.0.1",
