@@ -33,23 +33,22 @@ interface LightningPluginOpts {
   lndIdentityPubkey: string
   // 'host:port' that is listening for P2P lightning connections
   lndHost: string
-  // max satoshis permitted in each packet
   peerPort?: string
+  // max satoshis permitted in each packet
   maxPacketAmount?: BigNumber.Value
   // lib for calls to lightning daemon
   lnd: LndOpts
 }
 
-export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
+export default class LightningPlugin extends EventEmitter2
+  implements PluginInstance {
   public static readonly version = 2
-  public lightning: LightningService
-  public readonly lndOpts: LndOpts
+  public readonly lightning: LightningService
   public readonly _lndIdentityPubkey: string
   public readonly _lndHost: string
   public readonly _peerPort: string
   public readonly _log: Logger
   public readonly _store: StoreWrapper
-  public readonly _role: 'client' | 'server'
   public readonly _maxPacketAmount: BigNumber
   public readonly _balance: {
     minimum: BigNumber
@@ -92,7 +91,8 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
     this._lndIdentityPubkey = lndIdentityPubkey
     this._lndHost = lndHost
     this._peerPort = peerPort
-    this.lndOpts = lnd
+
+    this.lightning = connectLnd(lnd)
 
     this._store = new StoreWrapper(store)
 
@@ -158,13 +158,14 @@ export = class LightningPlugin extends EventEmitter2 implements PluginInstance {
   }
 
   public async connect() {
-    this.lightning = await connectLnd(this.lndOpts)
+    await this.lightning.waitForReady()
     return this._plugin.connect()
   }
 
   public async disconnect() {
     await this._store.close()
-    return this._plugin.disconnect()
+    await this._plugin.disconnect()
+    this.lightning.disconnect()
   }
 
   public isConnected() {

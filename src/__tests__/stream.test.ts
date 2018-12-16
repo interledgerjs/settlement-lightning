@@ -7,7 +7,7 @@ import {
   DataAndMoneyStream
 } from 'ilp-protocol-stream'
 import { performance } from 'perf_hooks'
-import LightningPlugin = require('..')
+import LightningPlugin from '..'
 import { convert, Unit } from '../account'
 import { connectLnd } from '../utils/lightning'
 
@@ -37,12 +37,13 @@ test('client streams data and money to server', async (t: any) => {
 
   // Rebalance the channel if necessary
 
-  const lightning = await connectLnd({
+  const lightning = connectLnd({
     tlsCert: process.env.LND_TLSCERT_C_BASE64!,
     macaroon: process.env.LND_MACAROON_C_BASE64!,
     lndHost: process.env.LND_PEERHOST_C!
   })
 
+  await lightning.waitForReady()
   const channels = await lightning.getChannels()
   const peerChannel = channels.find(
     c => c.getActive() && c.getRemotePubkey() === process.env.LND_PUBKEY_B!
@@ -90,16 +91,19 @@ test('client streams data and money to server', async (t: any) => {
 
   let actualReceived = new BigNumber(0)
 
-  clientPlugin.registerMoneyHandler(Promise.resolve)
-  serverPlugin.registerMoneyHandler(async (amount: string) => {
-    actualReceived = actualReceived.plus(amount)
+  const readyToSend = new Promise(resolve => {
+    clientPlugin.registerMoneyHandler(Promise.resolve)
+    serverPlugin.registerMoneyHandler(async (amount: string) => {
+      actualReceived = actualReceived.plus(amount)
+      resolve()
+    })
   })
 
   await serverPlugin.connect()
   await clientPlugin.connect()
 
   // Wait for the client to finish prefunding
-  await new Promise(r => setTimeout(r, 1000))
+  await readyToSend
 
   // Setup the receiver (Ethereum server, Stream server)
   const streamServer = await createServer({

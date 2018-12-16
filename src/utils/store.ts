@@ -7,19 +7,19 @@ export interface Store {
 export class MemoryStore implements Store {
   private _store: Map<string, string>
 
-  constructor () {
+  constructor() {
     this._store = new Map()
   }
 
-  async get (k: string) {
+  async get(k: string) {
     return this._store.get(k)
   }
 
-  async put (k: string, v: string) {
+  async put(k: string, v: string) {
     this._store.set(k, v)
   }
 
-  async del (k: string) {
+  async del(k: string) {
     this._store.delete(k)
   }
 }
