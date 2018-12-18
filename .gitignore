@@ -59,5 +59,7 @@ typings/
 
 # Compiled javascript
 build/
+generated/
 
+# Editor configs
 .vscode/

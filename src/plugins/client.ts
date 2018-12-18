@@ -1,13 +1,12 @@
+import { TYPE_MESSAGE, MIME_APPLICATION_OCTET_STREAM } from 'btp-packet'
 import * as IlpPacket from 'ilp-packet'
-const btpPacket = require('btp-packet')
 
 import BtpPlugin, { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
-import LightningAccount, {requestId } from '../account'
+import LightningAccount, { requestId } from '../account'
 import { PluginInstance, PluginServices } from '../utils/types'
 
-export default class LightningClientPlugin
-extends BtpPlugin implements PluginInstance {
-
+export default class LightningClientPlugin extends BtpPlugin
+  implements PluginInstance {
   private _account: LightningAccount
 
   constructor(opts: any, api: PluginServices) {
@@ -16,7 +15,7 @@ extends BtpPlugin implements PluginInstance {
       master: opts.master,
       // server is only counterparty
       accountName: 'server',
-      moneyHandler: async (amount) => {
+      moneyHandler: async amount => {
         if (this._moneyHandler) {
           return this._moneyHandler(amount)
         }
@@ -25,37 +24,41 @@ extends BtpPlugin implements PluginInstance {
     })
   }
 
-  public async _connect(): Promise < void > {
+  public async _connect(): Promise<void> {
     // sets up peer account & exchanges lnd identity pubkeys
+    this._account.emit('connected')
     await this._account.connect()
   }
 
   public _handleData(
     from: string,
     message: BtpPacket
-  ): Promise < BtpSubProtocol[] > {
-    return this._account.handleData(message, this._dataHandler)
+  ): Promise<BtpSubProtocol[]> {
+    return this._account.handleData(message, this._dataHandler!)
   }
 
-  public async sendData(buffer: Buffer): Promise < Buffer > {
+  public async sendData(buffer: Buffer): Promise<Buffer> {
     const preparePacket = IlpPacket.deserializeIlpPacket(buffer)
     if (preparePacket.type !== IlpPacket.Type.TYPE_ILP_PREPARE) {
       throw new Error('Packet must be a PREAPRE')
     }
 
     const response = await this._call('', {
-      type: btpPacket.TYPE_MESSAGE,
+      type: TYPE_MESSAGE,
       requestId: await requestId(),
       data: {
-        protocolData: [{
-          protocolName: 'ilp',
-          contentType: btpPacket.MIME_APPLICATION_OCTET_STREAM,
-          data: buffer
-        }]
+        protocolData: [
+          {
+            protocolName: 'ilp',
+            contentType: MIME_APPLICATION_OCTET_STREAM,
+            data: buffer
+          }
+        ]
       }
     })
-    const ilpResponse = response.protocolData.filter((p: any) =>
-      p.protocolName === 'ilp')[0]
+    const ilpResponse = response.protocolData.filter(
+      (p: any) => p.protocolName === 'ilp'
+    )[0]
     if (ilpResponse) {
       const responsePacket = IlpPacket.deserializeIlpPacket(ilpResponse.data)
       this._account.handlePrepareResponse(preparePacket, responsePacket)
@@ -64,7 +67,7 @@ extends BtpPlugin implements PluginInstance {
     return Buffer.alloc(0)
   }
 
-  public _disconnect(): Promise < void > {
+  public _disconnect(): Promise<void> {
     return this._account.disconnect()
   }
 }
