@@ -1,10 +1,13 @@
-import LightningPlugin from '.'
-
+import BigNumber from 'bignumber.js'
+import { decode as decodeInvoice } from 'bolt11'
 import {
   MIME_APPLICATION_JSON,
   MIME_APPLICATION_OCTET_STREAM,
+  MIME_TEXT_PLAIN_UTF8,
   TYPE_MESSAGE
 } from 'btp-packet'
+import { randomBytes } from 'crypto'
+import { EventEmitter2 } from 'eventemitter2'
 import {
   deserializeIlpPrepare,
   Errors,
@@ -14,15 +17,10 @@ import {
   Type
 } from 'ilp-packet'
 import { BtpPacket, BtpPacketData, BtpSubProtocol } from 'ilp-plugin-btp'
-
-import BigNumber from 'bignumber.js'
-import { decode as decodeInvoice } from 'bolt11'
-import { randomBytes } from 'crypto'
-import { EventEmitter2 } from 'eventemitter2'
+import pTimes from 'p-times'
 import { promisify } from 'util'
-
+import LightningPlugin from '.'
 import { Invoice } from '../generated/rpc_pb'
-
 import { DataHandler, MoneyHandler } from './utils/types'
 
 // Used to denominate which asset scale we are using
@@ -41,8 +39,22 @@ export const convert = (
 export const format = (num: BigNumber.Value, from: Unit) =>
   convert(num, from, Unit.Satoshi) + ' Satoshis'
 
-export const getSubProtocol = (message: BtpPacketData, name: string) =>
-  message.protocolData.find((p: BtpSubProtocol) => p.protocolName === name)
+export type ParsedSubprotocol = string | Buffer | undefined
+
+export const getSubProtocol = (
+  message: BtpPacketData,
+  name: string
+): ParsedSubprotocol => {
+  const subProtocol = message.protocolData.find(
+    (p: BtpSubProtocol) => p.protocolName === name
+  )
+  if (subProtocol) {
+    const { contentType, data } = subProtocol
+    return contentType === MIME_APPLICATION_OCTET_STREAM
+      ? data
+      : data.toString()
+  }
+}
 
 export const requestId = async () =>
   (await promisify(randomBytes)(4)).readUInt32BE(0)
@@ -61,15 +73,18 @@ export default class LightningAccount extends EventEmitter2 {
     payoutAmount: BigNumber
   }
 
-  /**
-   * Requests that this instance pays the the peer/counterparty
-   * Mapping of paymentRequest -> paymentHash
-   * Paid in FIFO order
-   */
-  private incomingInvoices = new Map<string, string>()
+  /** Requests that this instance pays the the peer/counterparty, to be paid in FIFO order */
+  private incomingInvoices: {
+    paymentRequest: string
+    paymentHash: string
+    expiry: number // UNIX timestamp denoting when the invoice expires in LND (seconds)
+  }[] = []
 
-  // Requests that the peer/counterparty pays this instance
-  private outgoingInvoices = new Set<string>()
+  /**
+   * Requests that the peer/counterparty pays this instance
+   * - Mapping of paymentRequest to a timer to send a new invoice before this one expires
+   */
+  private outgoingInvoices = new Map<string, NodeJS.Timeout>()
 
   // used to send BTP packets to counterparty
   private sendMessage: (message: BtpPacket) => Promise<BtpPacketData>
@@ -142,7 +157,7 @@ export default class LightningAccount extends EventEmitter2 {
     this.isConnected
       .then(async () => {
         await this.sendPeeringInfo()
-        await this.sendInvoices(20)
+        await pTimes(20, () => this.sendInvoice())
       })
       .catch(err =>
         this.master._log.error(`Error on connect handshake: ${err.message}`)
@@ -154,13 +169,11 @@ export default class LightningAccount extends EventEmitter2 {
     dataHandler: DataHandler
   ): Promise<BtpSubProtocol[]> {
     const peeringRequest = getSubProtocol(data, 'peeringRequest')
-    if (peeringRequest) {
+    if (typeof peeringRequest === 'string') {
       try {
-        const { lndIdentityPubkey, lndPeeringHost } = JSON.parse(
-          peeringRequest.data.toString()
-        )
+        const { lndIdentityPubkey, lndPeeringHost } = JSON.parse(peeringRequest)
 
-        this.master._log.trace(
+        this.master._log.debug(
           `Attempting to peer over Lightning with ${lndIdentityPubkey}`
         )
 
@@ -176,43 +189,46 @@ export default class LightningAccount extends EventEmitter2 {
       }
     }
 
-    const incomingInvoices = getSubProtocol(data, 'invoices')
-    if (incomingInvoices) {
-      const invoices = JSON.parse(incomingInvoices.data.toString()) as string[]
+    const paymentRequest = getSubProtocol(data, 'paymentRequest')
+    if (typeof paymentRequest === 'string') {
+      // Throws if the invoice wasn't signed correctly
+      const { satoshis, payeeNodeKey, timestamp, tags } = decodeInvoice(
+        paymentRequest
+      )
 
-      // If any of the invoices are invalid, return a BTP error
-      for (const invoice of invoices) {
-        // Throws if the invoice wasn't signed correctly
-        const { satoshis, payeeNodeKey, tags } = decodeInvoice(invoice)
-
-        // Payee = entity to whom money is paid (the peer)
-        const toPeer = payeeNodeKey === this.account.lndIdentityPubkey
-        if (!toPeer) {
-          throw new Error(
-            `Invalid incoming invoice: ${payeeNodeKey} does not match the peer's LND public key: ${
-              this.master._lndIdentityPubkey
-            }`
-          )
-        }
-
-        const anyAmount = satoshis === null
-        if (!anyAmount) {
-          throw new Error(
-            `Invalid incoming invoice: amount of ${satoshis} does not allow paying an arbitrary amount`
-          )
-        }
-
-        const paymentHash = tags.find(
-          ({ tagName }) => tagName === 'payment_hash'
+      // Payee = entity to whom money is paid (the peer)
+      const toPeer = payeeNodeKey === this.account.lndIdentityPubkey
+      if (!toPeer) {
+        throw new Error(
+          `Invalid incoming invoice: ${payeeNodeKey} does not match the peer's LND public key: ${
+            this.master._lndIdentityPubkey
+          }`
         )
-        if (!paymentHash) {
-          throw new Error(`Invalid incoming invoice: no payment hash provided`)
-        }
-
-        this.incomingInvoices.set(invoice, paymentHash.data)
       }
 
-      // Since there are new invoices, attempt settlement
+      const anyAmount = satoshis === null
+      if (!anyAmount) {
+        throw new Error(
+          `Invalid incoming invoice: amount of ${satoshis} does not allow paying an arbitrary amount`
+        )
+      }
+
+      const paymentHash = tags.find(({ tagName }) => tagName === 'payment_hash')
+      if (!paymentHash) {
+        throw new Error(`Invalid incoming invoice: no payment hash provided`)
+      }
+
+      const expireTag = tags.find(({ tagName }) => tagName === 'expire_time')
+      // Default expiry per BOLT11 spec is 1 hour / 3600 seconds
+      const expiry = (expireTag ? expireTag.data : 3600) + timestamp
+
+      this.incomingInvoices.push({
+        paymentRequest,
+        paymentHash: paymentHash.data,
+        expiry
+      })
+
+      // Since there are is a new invoice, attempt settlement
       this.attemptSettle().catch(err =>
         this.master._log.error(`Error during settlement: ${err.message}`)
       )
@@ -221,56 +237,11 @@ export default class LightningAccount extends EventEmitter2 {
     // Handle incoming ILP PREPARE packets from peer
     // plugin-btp handles correlating the response packets for the dataHandler
     const ilp = getSubProtocol(data, 'ilp')
-    if (ilp && ilp.data[0] === Type.TYPE_ILP_PREPARE) {
+    if (Buffer.isBuffer(ilp)) {
       return this.handlePrepare(ilp, dataHandler)
     }
 
     return []
-  }
-
-  // Handle the response from a forwarded ILP PREPARE
-  public handlePrepareResponse(
-    preparePacket: {
-      type: Type.TYPE_ILP_PREPARE
-      typeString?: 'ilp_prepare'
-      data: IlpPrepare
-    },
-    responsePacket: IlpPacket
-  ): void {
-    const isFulfill = responsePacket.type === Type.TYPE_ILP_FULFILL
-    if (isFulfill) {
-      this.master._log.trace(
-        `Received a FULFILL in response to the forwarded PREPARE from sendData`
-      )
-
-      // Update balance to reflect that we owe them the amount of the FULFILL
-      const amount = new BigNumber(preparePacket.data.amount)
-      try {
-        this.subBalance(amount)
-        this.account.payoutAmount = this.account.payoutAmount.plus(amount)
-      } catch (err) {
-        // Balance update likely dropped below the minimum, so throw an internal error
-        this.master._log.error(
-          `Failed to fulfill response to PREPARE: ${err.message}`
-        )
-        throw new Errors.InternalError(err.message)
-      }
-    }
-
-    // Attempt to settle on fulfills and* T04s (to resolve stalemates)
-    const shouldSettle =
-      isFulfill ||
-      (responsePacket.type === Type.TYPE_ILP_REJECT &&
-        responsePacket.data.code === 'T04')
-    if (shouldSettle) {
-      this.attemptSettle().catch(err =>
-        this.master._log.error(`Error during settlement: ${err.message}`)
-      )
-    }
-  }
-
-  public async disconnect() {
-    return this.master._store.unload(`${this.account.accountName}:account`)
   }
 
   /**
@@ -305,19 +276,38 @@ export default class LightningAccount extends EventEmitter2 {
     )
   }
 
-  private async sendInvoices(numInvoices: number): Promise<void> {
+  private async sendInvoice(): Promise<void> {
+    this.master._log.info(`Sending payment request to peer`)
+
     /**
      * Since each invoice is only associated with this account, and
      * we assume Lightning will never generate a duplicate invoice,
      * no single invoice should be credited to more than one account.
+     *
+     * Per https://api.lightning.community/#addinvoice
+     * "Any duplicated invoices are rejected, therefore all invoices must have a unique payment preimage."
      */
 
-    const invoices = await Promise.all(
-      Array(numInvoices)
-        .fill(null)
-        .map(() => this.master.lightning.createPaymentRequest())
+    const paymentRequest = await this.master.lightning.createPaymentRequest()
+
+    /**
+     * In 55 minutes, send a new invoice to replace this one
+     * LND default expiry is 1 hour (3600 seconds), since we didn't specify one
+     */
+    const expiry = 3300
+    this.outgoingInvoices.set(
+      paymentRequest,
+      setTimeout(() => {
+        this.outgoingInvoices.delete(paymentRequest)
+        this.sendInvoice().catch(err =>
+          this.master._log.error(
+            `Failed to replace soon-expiring invoice (peer may become unable to pay us): ${
+              err.message
+            }`
+          )
+        )
+      }, expiry * 1000)
     )
-    this.outgoingInvoices = new Set([...this.outgoingInvoices, ...invoices])
 
     await this.sendMessage({
       type: TYPE_MESSAGE,
@@ -325,14 +315,14 @@ export default class LightningAccount extends EventEmitter2 {
       data: {
         protocolData: [
           {
-            protocolName: 'invoices',
-            contentType: MIME_APPLICATION_JSON,
-            data: Buffer.from(JSON.stringify(invoices))
+            protocolName: 'paymentRequest',
+            contentType: MIME_TEXT_PLAIN_UTF8,
+            data: Buffer.from(paymentRequest)
           }
         ]
       }
     }).catch(err =>
-      this.master._log.error(`Error while exchanging invoices: ${err.message}`)
+      this.master._log.error(`Error while exchanging invoice: ${err.message}`)
     )
   }
 
@@ -341,12 +331,15 @@ export default class LightningAccount extends EventEmitter2 {
    */
 
   private handleIncomingPayment(invoice: Invoice) {
+    const paymentRequest = invoice.getPaymentRequest()
+
     const isPaid = invoice.getSettled()
-    const isLinkedToAccount = this.outgoingInvoices.has(
-      invoice.getPaymentRequest()
-    )
+    const isLinkedToAccount = this.outgoingInvoices.has(paymentRequest)
+
     if (isPaid && isLinkedToAccount) {
-      this.outgoingInvoices.delete(invoice.getPaymentRequest())
+      clearTimeout(this.outgoingInvoices.get(paymentRequest)!) // Remove expiry timer to replace this invoice
+      this.outgoingInvoices.delete(paymentRequest)
+
       this.subBalance(new BigNumber(invoice.getAmtPaidSat()))
 
       if (typeof this.moneyHandler !== 'function') {
@@ -357,7 +350,7 @@ export default class LightningAccount extends EventEmitter2 {
       )
 
       // Send another invoice to the peer so they're still able to pay us
-      this.sendInvoices(1).catch(err =>
+      this.sendInvoice().catch(err =>
         this.master._log.error(
           `Failed to send invoice (peer may become unable to pay us): ${
             err.message
@@ -402,16 +395,20 @@ export default class LightningAccount extends EventEmitter2 {
 
     // After this point, any uncaught or thrown error should revert balance
     try {
-      // Grab an invoice from that set available
-      const invoice = this.incomingInvoices.entries().next().value
+      // Prune invoices that expire within the next minute
+      const minuteFromNow = Date.now() / 1000 + 60 // Unix timestamp for 1 minute from now
+      this.incomingInvoices = this.incomingInvoices.filter(
+        ({ expiry }) => minuteFromNow < expiry
+      )
+
+      // Get the oldest invoice as the one to pay
+      // Remove it immediately so we don't pay it twice
+      const invoice = this.incomingInvoices.shift()
       if (!invoice) {
-        throw new Error('no cached invoices to pay')
+        throw new Error('no valid cached invoices to pay')
       }
 
-      // Delete the invoice before it's paid so we don't accidentally pay it twice
-      const [paymentRequest, paymentHash] = invoice
-      this.incomingInvoices.delete(paymentRequest)
-
+      const { paymentRequest, paymentHash } = invoice
       await this.master.lightning.payInvoice(
         paymentRequest,
         paymentHash,
@@ -437,10 +434,7 @@ export default class LightningAccount extends EventEmitter2 {
    * Generic plugin boilerplate (not specific to Lightning)
    */
 
-  private async handlePrepare(
-    { data }: BtpSubProtocol,
-    dataHandler: DataHandler
-  ) {
+  private async handlePrepare(data: Buffer, dataHandler: DataHandler) {
     try {
       const { amount } = deserializeIlpPrepare(data)
       const amountBN = new BigNumber(amount)
@@ -484,6 +478,47 @@ export default class LightningAccount extends EventEmitter2 {
           data: errorToReject('', err)
         }
       ]
+    }
+  }
+
+  // Handle the response from a forwarded ILP PREPARE
+  public handlePrepareResponse(
+    preparePacket: {
+      type: Type.TYPE_ILP_PREPARE
+      typeString?: 'ilp_prepare'
+      data: IlpPrepare
+    },
+    responsePacket: IlpPacket
+  ): void {
+    const isFulfill = responsePacket.type === Type.TYPE_ILP_FULFILL
+    if (isFulfill) {
+      this.master._log.trace(
+        `Received a FULFILL in response to the forwarded PREPARE from sendData`
+      )
+
+      // Update balance to reflect that we owe them the amount of the FULFILL
+      const amount = new BigNumber(preparePacket.data.amount)
+      try {
+        this.subBalance(amount)
+        this.account.payoutAmount = this.account.payoutAmount.plus(amount)
+      } catch (err) {
+        // Balance update likely dropped below the minimum, so throw an internal error
+        this.master._log.error(
+          `Failed to fulfill response to PREPARE: ${err.message}`
+        )
+        throw new Errors.InternalError(err.message)
+      }
+    }
+
+    // Attempt to settle on fulfills and* T04s (to resolve stalemates)
+    const shouldSettle =
+      isFulfill ||
+      (responsePacket.type === Type.TYPE_ILP_REJECT &&
+        responsePacket.data.code === 'T04')
+    if (shouldSettle) {
+      this.attemptSettle().catch(err =>
+        this.master._log.error(`Error during settlement: ${err.message}`)
+      )
     }
   }
 
@@ -541,5 +576,9 @@ export default class LightningAccount extends EventEmitter2 {
       }, new balance is ${format(newBalance, Unit.Satoshi)}`
     )
     this.account.balance = newBalance
+  }
+
+  public async disconnect() {
+    return this.master._store.unload(`${this.account.accountName}:account`)
   }
 }

@@ -115,7 +115,7 @@ export default class LightningPlugin extends EventEmitter2
     }
 
     if (this._balance.settleThreshold.eq(this._balance.minimum)) {
-      this._log.trace(
+      this._log.debug(
         `Auto-settlement disabled: plugin is in receive-only mode`
       )
     }

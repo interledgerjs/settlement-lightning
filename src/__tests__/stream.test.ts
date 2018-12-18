@@ -15,7 +15,7 @@ test('client streams data and money to server', async (t: any) => {
   const AMOUNT_TO_SEND = convert(0.0002, Unit.BTC, Unit.Satoshi)
   const SENDER_SETTLE_TO = convert('0.0001', Unit.BTC, Unit.Satoshi)
   const RECEIVER_MAX_BALANCE = new BigNumber(0)
-  const port = await (getPort() as Promise<number>)
+  const port = await getPort()
 
   // Sender plugin
   const clientPlugin = new LightningPlugin({
