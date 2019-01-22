@@ -28,7 +28,7 @@ Requires Node.js v8.10+.
 
 Here are the available options to pass to the plugin. Additional configuration options are also inherited from [ilp-plugin-btp](https://github.com/interledgerjs/ilp-plugin-btp) if the plugin is a client, and [ilp-plugin-mini-accounts](https://github.com/interledgerjs/ilp-plugin-mini-accounts) if the plugin is a server.
 
-### `role`
+#### `role`
 
 - Type:
   - `"client"` to connect to a single counterparty
@@ -41,7 +41,7 @@ Here are the available options to pass to the plugin. Additional configuration o
 - Type: `LndOpts` or `LndService`
 - Credentials to create a connection to the LND node, or an already constructed LND service
 
-If supplying credentials so the plugin creates the connection, provide an object with the following properties:
+To have the plugin create the connection internally, provide an object with the following properties:
 
 ##### `macaroon`
 
@@ -70,17 +70,19 @@ If supplying credentials so the plugin creates the connection, provide an object
 Alternatively, the LND client connection can be created externally using the same options and injected into the plugin, like so:
 
 ```js
-import LightningPlugin, { connectLnd } from 'ilp-plugin-lightning`
+import LightningPlugin, { connectLnd } from 'ilp-plugin-lightning'
 
 const lnd = connectLnd({
-  macaroon: '...',
-  tlsCert: '...',
-  hostname: 'localhost'
+  hostname: 'localhost',
+  macaroon:
+    'AgEDbG5kArsBAwoQ3/I9f6kgSE6aUPd85lWpOBIBMBoWCgdhZGRyZXNzEgRyZWFkEgV3cml0ZRoTCgRpbmZvEgRyZWFkEgV32ml0ZRoXCghpbnZvaWNlcxIEcmVhZBIFd3JpdGUaFgoHbWVzc2FnZRIEcmVhZBIFd3JpdGUaFwoIb2ZmY2hhaW4SBHJlYWQSBXdyaXRlGhYKB29uY2hhaW4SBHJlYWQSBXdyaXRlGhQKBXBlZXJzEgRyZWFkEgV3cml0ZQAABiAiUTBv3Eh6iDbdjmXCfNxp4HBEcOYNzXhrm+ncLHf5jA==',
+  tlsCert:
+    'LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUNpRENDQWkrZ0F3SUJBZ0lRZG81djBRQlhIbmppNGhSYWVlTWpOREFLQmdncWhrak9QUVFEQWpCSE1SOHcKSFFZRFZRUUtFeFpzYm1RZ1lYVjBiMmRsYm1WeVlYUmxaQ0JqWlhKME1TUXdJZ1lEVlFRREV4dEtkWE4wZFhOegpMVTFoWTBKdmIyc3RVSEp2TFRNdWJHOWpZV3d3SGhjTk1UZ3dPREl6TURVMU9ERXdXaGNOTVRreE1ERTRNRFUxCk9ERXdXakJITVI4d0hRWURWUVFLRXhac2JtUWdZWFYwYjJkbGJtVnlZWFJsWkNCalpYSjBNU1F3SWdZRFZRUUQKRXh0S2RYTjBkWE56TFUxaFkwSnZiMnN0VUhKdkxUTXViRzlqWVd3d1dUQVRCZ2NxaGtqT1BRSUJCZ2dxaGtpTwpQUU1CQndOQ0FBU0ZoUm0rdy9UMTBQb0t0ZzRsbTloQk5KakpENDczZmt6SHdQVUZ3eTkxdlRyUVNmNzU0M2oyCkpyZ0ZvOG1iVFYwVnRwZ3FrZksxSU1WS01MckYyMXhpbzRIOE1JSDVNQTRHQTFVZER3RUIvd1FFQXdJQ3BEQVAKQmdOVkhSTUJBZjhFQlRBREFRSC9NSUhWQmdOVkhSRUVnYzB3Z2NxQ0cwcDFjM1IxYzNNdFRXRmpRbTl2YXkxUQpjbTh0TXk1c2IyTmhiSUlKYkc5allXeG9iM04wZ2dSMWJtbDRnZ3AxYm1sNGNHRmphMlYwaHdSL0FBQUJoeEFBCkFBQUFBQUFBQUFBQUFBQUFBQUFCaHhEK2dBQUFBQUFBQUFBQUFBQUFBQUFCaHhEK2dBQUFBQUFBQUF3bGM5WmMKazdiRGh3VEFxQUVFaHhEK2dBQUFBQUFBQUJpTnAvLytHeFhHaHhEK2dBQUFBQUFBQUtXSjV0bGlET1JqaHdRSwpEd0FDaHhEK2dBQUFBQUFBQUc2V3ovLyszYXRGaHhEOTJ0RFF5djRUQVFBQUFBQUFBQkFBTUFvR0NDcUdTTTQ5CkJBTUNBMGNBTUVRQ0lBOU85eHRhem1keENLajBNZmJGSFZCcTVJN0pNbk9GUHB3UlBKWFFmcllhQWlCZDVOeUoKUUN3bFN4NUVDblBPSDVzUnB2MjZUOGFVY1hibXlueDlDb0R1ZkE9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg=='
 })
 
 const plugin = new LightningPlugin({
-  lnd,
-  // ... other options ...
+  lnd
+  // (Pass other config options here)
 })
 ```
 
@@ -132,13 +134,13 @@ All the following balance options are in units of _gwei_.
 
 This plugin uses the [Bilateral Transfer Protocol](https://github.com/interledger/rfcs/blob/master/0023-bilateral-transfer-protocol/0023-bilateral-transfer-protocol.md) over WebSockets to send messages between peers. Two subprotocols are supported:
 
-### `peeringRequest`
+#### `peeringRequest`
 
 - Format: `[Identity public key]@[hostname]:[port]`, UTF-8 encoded
 - Used for sharing peering information of our Lightning node with the peer
 - The receiver of the message will subsequently attempt to peer over the Lightning network
 
-### `paymentRequest`
+#### `paymentRequest`
 
 - Format: [BOLT11](https://github.com/lightningnetwork/lightning-rfc/blob/master/11-payment-encoding.md) encoded, then UTF-8 encoded
 - Used to send a invoice to the Interledger peer, so they have the ability to send payments to our instance
