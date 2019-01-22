@@ -1,75 +1,74 @@
-import LightningPlugin from '..'
-
+import { PluginInstance, PluginServices } from '../types/plugin'
 import MiniAccountsPlugin from 'ilp-plugin-mini-accounts'
-
-import * as IlpPacket from 'ilp-packet'
+import { ServerOptions } from 'ws'
+import { IldcpResponse } from 'ilp-protocol-ildcp'
 import { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
-
+import { IlpPacket, IlpPrepare, Type } from 'ilp-packet'
 import LightningAccount from '../account'
 
-import { PluginInstance, PluginServices } from '../utils/types'
+export interface MiniAccountsOpts {
+  port?: number
+  wsOpts?: ServerOptions
+  debugHostIldcpInfo?: IldcpResponse
+  allowedOrigins?: string[]
+}
 
-export default class LightningServerPlugin extends MiniAccountsPlugin
+export interface LightningServerOpts extends MiniAccountsOpts {
+  getAccount: (accountName: string) => LightningAccount
+  loadAccount: (accountName: string) => Promise<LightningAccount>
+}
+
+export class LightningServerPlugin extends MiniAccountsPlugin
   implements PluginInstance {
-  private _accounts: Map<string, LightningAccount>
-  private _master: LightningPlugin
+  private getAccount: (address: string) => LightningAccount
+  private loadAccount: (address: string) => Promise<LightningAccount>
 
-  constructor(opts: any, api: PluginServices) {
+  constructor(
+    { getAccount, loadAccount, ...opts }: LightningServerOpts,
+    api: PluginServices
+  ) {
     super(opts, api)
-    this._master = opts.master
-    // one account for each client
-    this._accounts = new Map()
+
+    this.getAccount = (address: string) =>
+      getAccount(this.ilpAddressToAccount(address))
+    this.loadAccount = (address: string) =>
+      loadAccount(this.ilpAddressToAccount(address))
   }
 
-  public _connect(address: string): Promise<void> {
-    return this._getAccount(address).connect()
+  _sendMessage(accountName: string, message: BtpPacket) {
+    return this._call(this._prefix + accountName, message)
   }
 
-  public _handleCustomData = async (
+  async _connect(address: string, message: BtpPacket): Promise<void> {
+    const account = await this.loadAccount(address)
+    return account.connect()
+  }
+
+  _handleCustomData = async (
     from: string,
     message: BtpPacket
   ): Promise<BtpSubProtocol[]> => {
-    this._getAccount(from).emit('connected')
-    return this._getAccount(from).handleData(message, this._dataHandler!)
+    const account = this.getAccount(from)
+    account.emit('connected')
+    return account.handleData(message)
   }
 
-  public _handlePrepareResponse = async (
+  _handlePrepareResponse = async (
     destination: string,
-    responsePacket: IlpPacket.IlpPacket,
+    responsePacket: IlpPacket,
     preparePacket: {
-      type: IlpPacket.Type.TYPE_ILP_PREPARE
+      type: Type.TYPE_ILP_PREPARE
       typeString?: 'ilp_prepare'
-      data: IlpPacket.IlpPrepare
+      data: IlpPrepare
     }
-  ): Promise<void> =>
-    this._getAccount(destination).handlePrepareResponse(
+  ) => {
+    return this.getAccount(destination).handlePrepareResponse(
       preparePacket,
       responsePacket
     )
-
-  public _close(from: string): Promise<void> {
-    return this._getAccount(from).disconnect()
   }
 
-  /* Gets the corresponding account for whichever peer we
-   * wish to communicate with.  Client does not have this because
-   * it only manages one account */
-  private _getAccount(address: string) {
-    const accountName = this.ilpAddressToAccount(address)
-    let account = this._accounts.get(accountName)
-    if (!account) {
-      account = new LightningAccount({
-        accountName,
-        master: this._master,
-        moneyHandler: async amount => {
-          if (this._moneyHandler) {
-            return this._moneyHandler(amount)
-          }
-        },
-        sendMessage: (message: BtpPacket) => this._call(address, message)
-      })
-      this._accounts.set(accountName, account)
-    }
-    return account
+  async _close(destination: string) {
+    this.getAccount(destination).unload()
   }
 }

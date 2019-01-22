@@ -7,9 +7,8 @@ import {
   DataAndMoneyStream
 } from 'ilp-protocol-stream'
 import { performance } from 'perf_hooks'
-import LightningPlugin from '..'
+import LightningPlugin, { connectLnd } from '..'
 import { convert, Unit } from '../account'
-import { connectLnd } from '../utils/lightning'
 
 test('client streams data and money to server', async (t: any) => {
   const AMOUNT_TO_SEND = convert(0.0002, Unit.BTC, Unit.Satoshi)
@@ -20,14 +19,11 @@ test('client streams data and money to server', async (t: any) => {
   // Sender plugin
   const clientPlugin = new LightningPlugin({
     role: 'client',
-    // @ts-ignore
     server: `btp+ws://userC:secretC@localhost:${port}`,
-    lndIdentityPubkey: process.env.LND_PUBKEY_C!,
-    lndHost: process.env.LND_PEERHOST_C!,
     lnd: {
       tlsCert: process.env.LND_TLSCERT_C_BASE64!,
       macaroon: process.env.LND_MACAROON_C_BASE64!,
-      lndHost: process.env.LND_PEERHOST_C!
+      hostname: process.env.LND_PEERHOST_C!
     },
     balance: {
       settleTo: SENDER_SETTLE_TO,
@@ -35,56 +31,24 @@ test('client streams data and money to server', async (t: any) => {
     }
   })
 
-  // Rebalance the channel if necessary
-
-  const lightning = connectLnd({
-    tlsCert: process.env.LND_TLSCERT_C_BASE64!,
-    macaroon: process.env.LND_MACAROON_C_BASE64!,
-    lndHost: process.env.LND_PEERHOST_C!
-  })
-
-  await lightning.waitForReady()
-  const channels = await lightning.getChannels()
-  const peerChannel = channels.find(
-    c => c.getActive() && c.getRemotePubkey() === process.env.LND_PUBKEY_B!
-  )
-  if (!peerChannel) {
-    return t.fail('no direct channel open between peers for testing purposes')
-  }
-
-  const sufficientChannelBalance = AMOUNT_TO_SEND.times(2).lt(
-    peerChannel.getLocalBalance()
-  )
-  const topUpAmount = sufficientChannelBalance ? 0 : AMOUNT_TO_SEND.times(10)
-  lightning.disconnect()
-
-  if (!sufficientChannelBalance) {
-    t.log('adjusting balance config to top up lightning channel')
-  }
-
   // Receiver plugin
   const serverPlugin = new LightningPlugin({
     role: 'server',
-    // @ts-ignore
     port,
-    prefix: 'private.asym.children',
-    // @ts-ignore
     debugHostIldcpInfo: {
       assetCode: 'BTC',
       assetScale: 8,
       clientAddress: 'private.btc'
     },
     maxPacketAmount: convert(0.000005, Unit.BTC, Unit.Satoshi), // 500 Satoshi
-    lndIdentityPubkey: process.env.LND_PUBKEY_B!,
-    lndHost: process.env.LND_PEERHOST_B!,
     lnd: {
       tlsCert: process.env.LND_TLSCERT_B_BASE64!,
       macaroon: process.env.LND_MACAROON_B_BASE64!,
-      lndHost: process.env.LND_PEERHOST_B!
+      hostname: process.env.LND_PEERHOST_B!
     },
     balance: {
-      maximum: RECEIVER_MAX_BALANCE.plus(topUpAmount),
-      settleTo: topUpAmount,
+      maximum: RECEIVER_MAX_BALANCE,
+      settleTo: 0,
       settleThreshold: 0
     }
   })

@@ -1,46 +1,52 @@
-import { TYPE_MESSAGE, MIME_APPLICATION_OCTET_STREAM } from 'btp-packet'
-import * as IlpPacket from 'ilp-packet'
-
-import BtpPlugin, { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
 import LightningAccount, { requestId } from '../account'
-import { PluginInstance, PluginServices } from '../utils/types'
+import BtpPlugin, {
+  BtpPacket,
+  BtpSubProtocol,
+  IlpPluginBtpConstructorOptions
+} from 'ilp-plugin-btp'
+import { TYPE_MESSAGE, MIME_APPLICATION_OCTET_STREAM } from 'btp-packet'
+import { PluginInstance, PluginServices } from '../types/plugin'
+import { deserializeIlpPacket, Type } from 'ilp-packet'
 
-export default class LightningClientPlugin extends BtpPlugin
-  implements PluginInstance {
-  private _account: LightningAccount
+export interface LightningClientOpts extends IlpPluginBtpConstructorOptions {
+  getAccount: (accountName: string) => LightningAccount
+  loadAccount: (accountName: string) => Promise<LightningAccount>
+}
 
-  constructor(opts: any, api: PluginServices) {
-    super(opts, api)
-    this._account = new LightningAccount({
-      master: opts.master,
-      // server is only counterparty
-      accountName: 'server',
-      moneyHandler: async amount => {
-        if (this._moneyHandler) {
-          return this._moneyHandler(amount)
-        }
-      },
-      sendMessage: (message: BtpPacket) => this._call('', message)
-    })
+export class LightningClientPlugin extends BtpPlugin implements PluginInstance {
+  private getAccount: () => LightningAccount
+  private loadAccount: () => Promise<LightningAccount>
+
+  constructor(
+    { getAccount, loadAccount, ...opts }: LightningClientOpts,
+    { log }: PluginServices
+  ) {
+    super(opts, { log })
+
+    this.getAccount = () => getAccount('peer')
+    this.loadAccount = () => loadAccount('peer')
   }
 
-  public async _connect(): Promise<void> {
-    // sets up peer account & exchanges lnd identity pubkeys
-    this._account.emit('connected')
-    await this._account.connect()
+  _sendMessage(accountName: string, message: BtpPacket) {
+    return this._call('', message)
   }
 
-  public _handleData(
-    from: string,
-    message: BtpPacket
-  ): Promise<BtpSubProtocol[]> {
-    return this._account.handleData(message, this._dataHandler!)
+  async _connect(): Promise<void> {
+    const account = await this.loadAccount()
+    account.emit('connected')
+    return account.connect()
   }
 
-  public async sendData(buffer: Buffer): Promise<Buffer> {
-    const preparePacket = IlpPacket.deserializeIlpPacket(buffer)
-    if (preparePacket.type !== IlpPacket.Type.TYPE_ILP_PREPARE) {
-      throw new Error('Packet must be a PREAPRE')
+  _handleData(from: string, message: BtpPacket): Promise<BtpSubProtocol[]> {
+    return this.getAccount().handleData(message)
+  }
+
+  // Add hooks into sendData before and after sending a packet for
+  // balance updates and settlement, akin to mini-accounts
+  async sendData(buffer: Buffer): Promise<Buffer> {
+    const preparePacket = deserializeIlpPacket(buffer)
+    if (preparePacket.type !== Type.TYPE_ILP_PREPARE) {
+      throw new Error('Packet must be a PREPARE')
     }
 
     const response = await this._call('', {
@@ -56,18 +62,17 @@ export default class LightningClientPlugin extends BtpPlugin
         ]
       }
     })
-    const ilpResponse = response.protocolData.filter(
-      (p: any) => p.protocolName === 'ilp'
-    )[0]
+
+    const ilpResponse = response.protocolData.find(
+      p => p.protocolName === 'ilp'
+    )
     if (ilpResponse) {
-      const responsePacket = IlpPacket.deserializeIlpPacket(ilpResponse.data)
-      this._account.handlePrepareResponse(preparePacket, responsePacket)
+      const responsePacket = deserializeIlpPacket(ilpResponse.data)
+      this.getAccount().handlePrepareResponse(preparePacket, responsePacket)
       return ilpResponse.data
     }
-    return Buffer.alloc(0)
-  }
 
-  public _disconnect(): Promise<void> {
-    return this._account.disconnect()
+    // TODO Should this return a REJECT packet?
+    return Buffer.alloc(0)
   }
 }
