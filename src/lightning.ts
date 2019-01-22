@@ -145,11 +145,11 @@ export const payInvoice = async (
       // The invoice was not paid and it's safe to undo the balance update
       const error = data.getPaymentError()
       if (error) {
-        paymentStream.off('data', handler)
+        paymentStream.removeListener('data', handler)
         return reject(`error sending payment: ${error}`)
       }
 
-      paymentStream.off('data', handler)
+      paymentStream.removeListener('data', handler)
       resolve()
     }
 
