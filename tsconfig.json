@@ -11,6 +11,9 @@
     "removeComments": true,
     "strict": true /* Enable all strict type-checking options. */,
     "esModuleInterop": true,
-    "typeRoots": ["node_modules/@types", "src/types"]
+    "typeRoots": ["node_modules/@types", "src/types"],
+    "paths": {
+      "pify": ["./types/pify"]
+    }
   }
 }

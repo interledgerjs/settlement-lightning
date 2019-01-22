@@ -3,8 +3,6 @@ export type MoneyHandler = (amount: string) => Promise<void>
 
 import { EventEmitter2 } from 'eventemitter2'
 
-import { Store } from './store'
-
 export interface PluginInstance extends EventEmitter2 {
   connect(options: {}): Promise<void>
   disconnect(): Promise<void>
@@ -25,6 +23,12 @@ export interface Logger {
   error(...msg: any[]): void
   debug(...msg: any[]): void
   trace(...msg: any[]): void
+}
+
+export interface Store {
+  get: (key: string) => Promise<string | void>
+  put: (key: string, value: string) => Promise<void>
+  del: (key: string) => Promise<void>
 }
 
 export interface PluginServices {
