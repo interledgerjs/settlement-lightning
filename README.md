@@ -90,7 +90,7 @@ const plugin = new LightningPlugin({
 
 - Type: [`BigNumber`](http://mikemcl.github.io/bignumber.js/), `number`, or `string`
 - Default: `Infinity`
-- Maximum amount in _gwei_ above which an incoming ILP packet should be rejected
+- Maximum amount in _satoshis_ above which an incoming ILP packet should be rejected
 
 #### `balance`
 
@@ -100,7 +100,7 @@ Contrary to other plugins that require the balance middleware in [ilp-connector]
 
 Thus, pre-funding—sending money to the peer _before_ forwarding packets through them—requires a positive `settleTo` amount, and post-funding—settling _after_ forwarding packets through them—requires a 0 or negative `settleTo` amount.
 
-All the following balance options are in units of _gwei_.
+All the following balance options are in units of _satoshis_.
 
 ##### `maximum`
 

@@ -51,12 +51,12 @@ export interface LightningPluginOpts
   lnd: LndOpts | LndService
   // directs whether master plugin behaves as client or server
   role: 'client' | 'server'
-  // Maximum allowed amount in gwei for incoming packets (gwei)
+  // Maximum allowed amount in satoshis for incoming packets (satoshis)
   maxPacketAmount?: BigNumber.Value
-  // Balance (positive) is amount in gwei the counterparty owes this instance
+  // Balance (positive) is amount in satoshis the counterparty owes this instance
   // (negative balance implies this instance owes the counterparty)
   // Debits add to the balance; credits subtract from the balance
-  // maximum >= settleTo > settleThreshold >= minimum (gwei)
+  // maximum >= settleTo > settleThreshold >= minimum (satoshis)
   balance?: {
     // Maximum balance counterparty owes this instance before further balance additions are rejected
     // e.g. settlements and forwarding of PREPARE packets with debits that increase balance above maximum would be rejected

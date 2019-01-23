@@ -64,7 +64,7 @@ export default class LightningAccount extends EventEmitter2 {
   /** Hash/account identifier in ILP address */
   private readonly accountName: string
   /**
-   * Net amount in gwei the counterparty owes the this instance, including secured paychan claims
+   * Net amount in satoshi the counterparty owes the this instance
    * - Negative implies this instance owes the counterparty
    */
   private readonly balance$: BehaviorSubject<BigNumber>
