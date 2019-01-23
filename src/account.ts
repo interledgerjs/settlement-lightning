@@ -62,18 +62,20 @@ export const requestId = async () =>
 
 export default class LightningAccount extends EventEmitter2 {
   /** Hash/account identifier in ILP address */
-  private readonly accountName: string
+  readonly accountName: string
   /**
    * Net amount in satoshi the counterparty owes the this instance
    * - Negative implies this instance owes the counterparty
    */
-  private readonly balance$: BehaviorSubject<BigNumber>
+  readonly balance$: BehaviorSubject<BigNumber>
   /**
    * Sum of all fulfilled packets owed to the counterparty that have yet to be paid out (always >= 0
    * - The balance limits when settlements happen, but this limits the settlement amount so we don't send
    *   all the clients' money directly back to them!
    */
-  private readonly payoutAmount$: BehaviorSubject<BigNumber>
+  readonly payoutAmount$: BehaviorSubject<BigNumber>
+  /** Lightning public key linked for the session */
+  peerIdentityPublicKey?: string
   /** Expose access to common configuration across accounts */
   private readonly master: LightningPlugin
   /** Send the given BTP packet message to this counterparty */
@@ -82,8 +84,6 @@ export default class LightningAccount extends EventEmitter2 {
   private readonly dataHandler: DataHandler
   /** Money handler from plugin for incoming money */
   private readonly moneyHandler: MoneyHandler
-  /** Lightning public key linked for the session */
-  private peerIdentityPublicKey?: string
   /**
    * Requests that this instance pays the the peer/counterparty, to be paid in FIFO order
    * - Cached for duration of session

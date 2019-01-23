@@ -7,7 +7,7 @@ import {
   DataAndMoneyStream
 } from 'ilp-protocol-stream'
 import { performance } from 'perf_hooks'
-import LightningPlugin, { connectLnd } from '..'
+import LightningPlugin from '..'
 import { convert, Unit } from '../account'
 
 test('client streams data and money to server', async (t: any) => {
