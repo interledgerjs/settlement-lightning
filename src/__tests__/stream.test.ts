@@ -17,7 +17,7 @@ test('client streams data and money to server', async (t: any) => {
   const port = await getPort()
 
   // Test independently creating the Lightning client to inject into the plugin
-  const clientLnd = await connectLnd({
+  const clientLnd = connectLnd({
     tlsCert: process.env.LND_TLSCERT_C_BASE64!,
     macaroon: process.env.LND_MACAROON_C_BASE64!,
     hostname: process.env.LND_PEERHOST_C!
