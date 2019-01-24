@@ -19,7 +19,7 @@ import { BtpPacket, BtpPacketData, BtpSubProtocol } from 'ilp-plugin-btp'
 import pTimes from 'p-times'
 import { promisify } from 'util'
 import LightningPlugin from '.'
-import { Invoice, GetInfoRequest } from '../generated/rpc_pb'
+import { Invoice } from '../generated/rpc_pb'
 import { DataHandler, MoneyHandler } from './types/plugin'
 import { connectPeer, createPaymentRequest, payInvoice } from './lightning'
 import { BehaviorSubject } from 'rxjs'
@@ -137,7 +137,7 @@ export default class LightningAccount extends EventEmitter2 {
   }
 
   async connect() {
-    this.master._invoiceStream.on('data', (data: Invoice) =>
+    this.master._invoiceStream!.on('data', (data: Invoice) =>
       this.handleIncomingPayment(data)
     )
 
@@ -226,7 +226,6 @@ export default class LightningAccount extends EventEmitter2 {
         expiry
       })
 
-      // TODO Will this work with the connector refactor?
       // Since there is a new invoice, attempt settlement
       this.attemptSettle().catch(err =>
         this.master._log.error(`Error during settlement: ${err.message}`)
@@ -250,10 +249,6 @@ export default class LightningAccount extends EventEmitter2 {
   private async sendPeeringInfo(): Promise<void> {
     this.master._log.debug(`Sharing identity pubkey with peer`)
 
-    // Fetch public key & host for peering directly from LND
-    const response = await this.master._lightning.getInfo(new GetInfoRequest())
-    const hostUri = response.getUrisList()[0] // [identityPubKey]@[hostname]:[port]
-
     await this.sendMessage({
       type: TYPE_MESSAGE,
       requestId: await requestId(),
@@ -262,7 +257,7 @@ export default class LightningAccount extends EventEmitter2 {
           {
             protocolName: 'peeringRequest',
             contentType: MIME_TEXT_PLAIN_UTF8,
-            data: Buffer.from(hostUri, 'utf8')
+            data: Buffer.from(this.master._lightningAddress!, 'utf8')
           }
         ]
       }
@@ -369,7 +364,7 @@ export default class LightningAccount extends EventEmitter2 {
 
     const { paymentRequest, paymentHash } = invoice
     await payInvoice(
-      this.master._paymentStream,
+      this.master._paymentStream!,
       paymentRequest,
       paymentHash,
       amount

@@ -27,6 +27,7 @@ import {
   Store
 } from './types/plugin'
 import { BehaviorSubject } from 'rxjs'
+import { GetInfoRequest } from '../generated/rpc_pb'
 
 // Re-export Lightning related-services
 export * from './lightning'
@@ -92,9 +93,14 @@ export default class LightningPlugin extends EventEmitter2
   _dataHandler: DataHandler = defaultDataHandler
   _moneyHandler: MoneyHandler = defaultMoneyHandler
   /** Bidirectional streaming RPC to send outgoing payments and receive attestations */
-  _paymentStream: PaymentStream
+  _paymentStream?: PaymentStream
   /** Streaming RPC of newly added or settled invoices */
-  _invoiceStream: InvoiceStream
+  _invoiceStream?: InvoiceStream
+  /**
+   * Unique identififer and host the Lightning node of this instance:
+   * [identityPubKey]@[hostname]:[port]
+   */
+  _lightningAddress?: string
 
   constructor(
     {
@@ -124,13 +130,6 @@ export default class LightningPlugin extends EventEmitter2
       typeof o.hostname === 'string'
     this._serviceIsInternal = isLndOpts(lnd)
     this._lightning = isLndOpts(lnd) ? connectLnd(lnd) : lnd
-
-    /*
-     * Create only a single HTTP/2 stream per-plugin for
-     * invoices and payments (not per-account)
-     */
-    this._paymentStream = createPaymentStream(this._lightning)
-    this._invoiceStream = createInvoiceStream(this._lightning)
 
     this._store = store
 
@@ -245,6 +244,22 @@ export default class LightningPlugin extends EventEmitter2
 
   async connect() {
     await waitForReady(this._lightning)
+
+    // Fetch public key & host for peering directly from LND
+    const response = await this._lightning.getInfo(new GetInfoRequest())
+    this._lightningAddress = response.getUrisList()[0]
+
+    /*
+     * Create only a single HTTP/2 stream per-plugin for
+     * invoices and payments (not per-account)
+     *
+     * Create the streams after the connection has been established
+     * (otherwise if the credentials turn out to be invalid,
+     * this can throw some odd error messages)
+     */
+    this._paymentStream = createPaymentStream(this._lightning)
+    this._invoiceStream = createInvoiceStream(this._lightning)
+
     return this._plugin.connect()
   }
 
