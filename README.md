@@ -130,7 +130,7 @@ All the following balance options are in units of _satoshis_.
 - Default: `-Infinity`
 - Maximum this instance owes the counterparty before further balance subtractions are rejected (e.g. incoming money/claims and forwarding of FULFILL packets with credits that reduce balance below minimum would be rejected)
 
-## Bilateral communication
+## Bilateral Communication
 
 This plugin uses the [Bilateral Transfer Protocol](https://github.com/interledger/rfcs/blob/master/0023-bilateral-transfer-protocol/0023-bilateral-transfer-protocol.md) over WebSockets to send messages between peers. Two subprotocols are supported:
 
@@ -145,3 +145,8 @@ This plugin uses the [Bilateral Transfer Protocol](https://github.com/interledge
 - Format: [BOLT11](https://github.com/lightningnetwork/lightning-rfc/blob/master/11-payment-encoding.md) encoded, then UTF-8 encoded
 - Used to send a invoice to the Interledger peer, so they have the ability to send payments to our instance
 - By default, peers send 20 invoices ahead of time, and share an additional invoice as each invoice expires or is paid
+
+## Known Issues
+
+- LND does not currently support pruning invoices (neither automatically nor manually). As this plugin may generate several invoices per second when a peer is actively streaming money, this can significantly increase the footprint of the LND database.
+- In theory, to reduce the overhead of frequently sharing invoices, the preimage for each payment could be deterministically generated from a pre-shared secret and randomess included by the sender when they send a payment. No such mechanism is supported by LND.
