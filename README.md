@@ -144,4 +144,4 @@ This plugin uses the [Bilateral Transfer Protocol](https://github.com/interledge
 
 - Format: [BOLT11](https://github.com/lightningnetwork/lightning-rfc/blob/master/11-payment-encoding.md) encoded, then UTF-8 encoded
 - Used to send a invoice to the Interledger peer, so they have the ability to send payments to our instance
-- By default, peers send 20 invoices ahead of time, and share an additional invoice as each invoice is paid
+- By default, peers send 20 invoices ahead of time, and share an additional invoice as each invoice expires or is paid
