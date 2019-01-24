@@ -7,7 +7,7 @@ import {
   DataAndMoneyStream
 } from 'ilp-protocol-stream'
 import { performance } from 'perf_hooks'
-import LightningPlugin from '..'
+import LightningPlugin, { connectLnd } from '..'
 import { convert, Unit } from '../account'
 
 test('client streams data and money to server', async (t: any) => {
@@ -16,15 +16,18 @@ test('client streams data and money to server', async (t: any) => {
   const RECEIVER_MAX_BALANCE = new BigNumber(0)
   const port = await getPort()
 
+  // Test independently creating the Lightning client to inject into the plugin
+  const clientLnd = await connectLnd({
+    tlsCert: process.env.LND_TLSCERT_C_BASE64!,
+    macaroon: process.env.LND_MACAROON_C_BASE64!,
+    hostname: process.env.LND_PEERHOST_C!
+  })
+
   // Sender plugin
   const clientPlugin = new LightningPlugin({
     role: 'client',
     server: `btp+ws://userC:secretC@localhost:${port}`,
-    lnd: {
-      tlsCert: process.env.LND_TLSCERT_C_BASE64!,
-      macaroon: process.env.LND_MACAROON_C_BASE64!,
-      hostname: process.env.LND_PEERHOST_C!
-    },
+    lnd: clientLnd,
     balance: {
       settleTo: SENDER_SETTLE_TO,
       settleThreshold: convert('0.00009', Unit.BTC, Unit.Satoshi)
@@ -69,7 +72,7 @@ test('client streams data and money to server', async (t: any) => {
   // Wait for the client to finish prefunding
   await readyToSend
 
-  // Setup the receiver (Ethereum server, Stream server)
+  // Setup the receiver (Lightning server, Stream server)
   const streamServer = await createServer({
     plugin: serverPlugin,
     receiveOnly: true
@@ -77,7 +80,7 @@ test('client streams data and money to server', async (t: any) => {
 
   const connProm = streamServer.acceptConnection()
 
-  // Setup the sender (Ethereum client, Stream client)
+  // Setup the sender (Lightning client, Stream client)
   const clientConn = await createConnection({
     plugin: clientPlugin,
     ...streamServer.generateAddressAndSecret()
