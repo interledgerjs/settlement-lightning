@@ -149,4 +149,4 @@ This plugin uses the [Bilateral Transfer Protocol](https://github.com/interledge
 ## Known Issues
 
 - LND does not currently support pruning invoices (neither automatically nor manually). As this plugin may generate several invoices per second when a peer is actively streaming money, this can significantly increase the footprint of the LND database.
-- In theory, to reduce the overhead of frequently sharing invoices, the preimage for each payment could be deterministically generated from a pre-shared secret and randomess included by the sender when they send a payment. No such mechanism is supported by LND.
+- LND may soon support [spontaneous payments](https://github.com/lightningnetwork/lnd/pull/2455), which would eliminate the overhead of frequently sharing invoices.
