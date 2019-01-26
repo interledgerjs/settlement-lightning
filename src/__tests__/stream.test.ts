@@ -20,7 +20,8 @@ test('client streams data and money to server', async (t: any) => {
   const clientLnd = connectLnd({
     tlsCert: process.env.LND_TLSCERT_C_BASE64!,
     macaroon: process.env.LND_MACAROON_C_BASE64!,
-    hostname: process.env.LND_PEERHOST_C!
+    hostname: process.env.LND_PEERHOST_C!,
+    grpcPort: parseInt(process.env.LND_GRPCPORT_C!, 10)
   })
 
   // Sender plugin
@@ -47,7 +48,8 @@ test('client streams data and money to server', async (t: any) => {
     lnd: {
       tlsCert: process.env.LND_TLSCERT_B_BASE64!,
       macaroon: process.env.LND_MACAROON_B_BASE64!,
-      hostname: process.env.LND_PEERHOST_B!
+      hostname: process.env.LND_PEERHOST_B!,
+      grpcPort: parseInt(process.env.LND_GRPCPORT_B!, 10)
     },
     balance: {
       maximum: RECEIVER_MAX_BALANCE,
