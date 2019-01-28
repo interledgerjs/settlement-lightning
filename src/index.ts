@@ -48,28 +48,38 @@ const defaultMoneyHandler: MoneyHandler = () => {
 export interface LightningPluginOpts
   extends MiniAccountsOpts,
     IlpPluginBtpConstructorOptions {
-  // lib for calls to lightning daemon
-  lnd: LndOpts | LndService
-  // directs whether master plugin behaves as client or server
   role: 'client' | 'server'
-  // Maximum allowed amount in satoshis for incoming packets (satoshis)
+  lnd: LndOpts | LndService
+  paymentStream?: PaymentStream
+  invoiceStream?: InvoiceStream
+  /** Maximum allowed amount in satoshis for incoming packets (satoshis) */
   maxPacketAmount?: BigNumber.Value
-  // Balance (positive) is amount in satoshis the counterparty owes this instance
-  // (negative balance implies this instance owes the counterparty)
-  // Debits add to the balance; credits subtract from the balance
-  // maximum >= settleTo > settleThreshold >= minimum (satoshis)
+  /**
+   * Balance (positive) is amount in satoshis the counterparty owes this instance
+   * (negative balance implies this instance owes the counterparty)
+   * Debits add to the balance; credits subtract from the balance
+   * maximum >= settleTo > settleThreshold >= minimum (satoshis)
+   */
   balance?: {
-    // Maximum balance counterparty owes this instance before further balance additions are rejected
-    // e.g. settlements and forwarding of PREPARE packets with debits that increase balance above maximum would be rejected
+    /**
+     * Maximum balance counterparty owes this instance before further balance additions are rejected
+     * e.g. settlements and forwarding of PREPARE packets with debits that increase balance above maximum would be rejected
+     */
     maximum?: BigNumber.Value
-    // New balance after settlement is triggered
-    // Since the balance will never exceed this following a settlement, it's almost a "max balance for settlements"
+    /**
+     * New balance after settlement is triggered
+     * Since the balance will never exceed this following a settlement, it's almost a "max balance for settlements"
+     */
     settleTo?: BigNumber.Value
-    // Automatic settlement is triggered when balance goes below this threshold
-    // If undefined, no automated settlement occurs
+    /**
+     * Automatic settlement is triggered when balance goes below this threshold
+     * If undefined, no automated settlement occurs
+     */
     settleThreshold?: BigNumber.Value
-    // Maximum this instance owes the counterparty before further balance subtractions are rejected
-    // e.g. incoming money/claims and forwarding of FULFILL packets with credits that reduce balance below minimum would be rejected
+    /**
+     * Maximum this instance owes the counterparty before further balance subtractions are rejected
+     * e.g. incoming money/claims and forwarding of FULFILL packets with credits that reduce balance below minimum would be rejected
+     */
     minimum?: BigNumber.Value
   }
 }
@@ -106,6 +116,8 @@ export default class LightningPlugin extends EventEmitter2
     {
       role = 'client',
       lnd,
+      paymentStream,
+      invoiceStream,
       maxPacketAmount = Infinity,
       balance: {
         maximum = Infinity,
@@ -130,6 +142,8 @@ export default class LightningPlugin extends EventEmitter2
       typeof o.hostname === 'string'
     this._serviceIsInternal = isLndOpts(lnd)
     this._lightning = isLndOpts(lnd) ? connectLnd(lnd) : lnd
+    this._paymentStream = paymentStream
+    this._invoiceStream = invoiceStream
 
     this._store = store
 
@@ -257,8 +271,12 @@ export default class LightningPlugin extends EventEmitter2
      * (otherwise if the credentials turn out to be invalid,
      * this can throw some odd error messages)
      */
-    this._paymentStream = createPaymentStream(this._lightning)
-    this._invoiceStream = createInvoiceStream(this._lightning)
+    if (!this._paymentStream) {
+      this._paymentStream = createPaymentStream(this._lightning)
+    }
+    if (!this._invoiceStream) {
+      this._invoiceStream = createInvoiceStream(this._lightning)
+    }
 
     return this._plugin.connect()
   }

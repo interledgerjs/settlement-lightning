@@ -67,7 +67,7 @@ To have the plugin create the connection internally, provide an object with the 
 - Default: `10009`
 - Port of LND gRPC server
 
-Alternatively, the LND client connection can be created externally using the same options and injected into the plugin, like so:
+Alternatively, the LND client can be created externally using the same options and injected into the plugin:
 
 ```js
 import LightningPlugin, { connectLnd } from 'ilp-plugin-lightning'

@@ -332,6 +332,13 @@ export default class LightningAccount extends EventEmitter2 {
       clearTimeout(this.outgoingInvoices.get(paymentRequest)!) // Remove expiry timer to replace this invoice
       this.outgoingInvoices.delete(paymentRequest)
 
+      this.master._log.info(
+        `received incoming payment for ${format(
+          invoice.getAmtPaidSat(),
+          Unit.Satoshi
+        )}`
+      )
+
       this.subBalance(new BigNumber(invoice.getAmtPaidSat()))
       this.moneyHandler(invoice.getAmtPaidSat().toString()).catch(err =>
         this.master._log.error(`Error in money handler: ${err.message}`)
