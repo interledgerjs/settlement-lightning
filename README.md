@@ -1,9 +1,9 @@
 # Interledger Lightning Plugin
 
 [![NPM Package](https://img.shields.io/npm/v/ilp-plugin-lightning.svg?style=flat)](https://npmjs.org/package/ilp-plugin-lightning)
-[![CircleCI](https://img.shields.io/circleci/project/github/interledgerjs/ilp-plugin-lightning.svg)](https://circleci.com/gh/interledgerjs/ilp-plugin-lightning)
-[![Codecov](https://img.shields.io/codecov/c/github/interledgerjs/ilp-plugin-lightning.svg)](https://codecov.io/gh/interledgerjs/ilp-plugin-lightning)
-[![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
+[![CircleCI](https://img.shields.io/circleci/project/github/interledgerjs/ilp-plugin-lightning/master.svg)](https://circleci.com/gh/interledgerjs/ilp-plugin-lightning)
+[![Codecov](https://img.shields.io/codecov/c/github/interledgerjs/ilp-plugin-lightning/master.svg)](https://codecov.io/gh/interledgerjs/ilp-plugin-lightning)
+[![Prettier](https://img.shields.io/badge/code_style-prettier-brightgreen.svg)](https://prettier.io/)
 [![Apache 2.0 License](https://img.shields.io/github/license/interledgerjs/ilp-plugin-lightning.svg)](https://github.com/interledgerjs/ilp-plugin-lightning/blob/master/LICENSE)
 
 :rotating_light: **Expect breaking changes while this plugin is in beta.**
