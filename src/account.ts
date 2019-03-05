@@ -378,6 +378,12 @@ export default class LightningAccount extends EventEmitter2 {
     )
   }
 
+  unload() {
+    // Don't refresh existing invoices
+    this.outgoingInvoices.forEach(timer => clearTimeout(timer))
+    this.master._accounts.delete(this.accountName)
+  }
+
   /**
    * Generic plugin boilerplate (not specific to Lightning)
    */
@@ -581,9 +587,5 @@ export default class LightningAccount extends EventEmitter2 {
       }, new balance is ${format(newBalance, Unit.Satoshi)}`
     )
     this.balance$.next(newBalance)
-  }
-
-  unload() {
-    this.master._accounts.delete(this.accountName)
   }
 }
