@@ -301,10 +301,24 @@ export default class LightningPlugin extends EventEmitter2
     return this._plugin.sendData(data)
   }
 
-  async sendMoney() {
-    this._log.error(
-      `sendMoney is not supported: use plugin balance configuration`
-    )
+  async sendMoney(amount: string) {
+    const peerAccount = this._accounts.get('peer')
+    if (peerAccount) {
+      // If the plugin is acting as a client, enable sendMoney
+      peerAccount.subBalance(new BigNumber(amount))
+      peerAccount.payoutAmount$.next(
+        peerAccount.payoutAmount$.value.plus(amount)
+      )
+      peerAccount
+        .attemptSettle()
+        .catch(err =>
+          this._log.error(`Error during settlement: ${err.message}`)
+        )
+    } else {
+      this._log.error(
+        `sendMoney is not supported: use plugin balance configuration`
+      )
+    }
   }
 
   registerDataHandler(dataHandler: DataHandler) {
