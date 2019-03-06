@@ -1,6 +1,6 @@
 {
   "name": "ilp-plugin-lightning",
-  "version": "1.0.0-beta.21",
+  "version": "1.0.0-beta.22",
   "description": "Settle interledger payments using the Lightning Network",
   "main": "index.js",
   "types": "build/index.d.ts",
