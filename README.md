@@ -1,16 +1,16 @@
-# ilp-plugin-lightning
+# Interledger Lightning Plugin
 
 [![NPM Package](https://img.shields.io/npm/v/ilp-plugin-lightning.svg?style=flat)](https://npmjs.org/package/ilp-plugin-lightning)
-[![CircleCI](https://img.shields.io/circleci/project/github/interledgerjs/ilp-plugin-lightning.svg)](https://circleci.com/gh/interledgerjs/ilp-plugin-lightning)
-[![Codecov](https://img.shields.io/codecov/c/github/interledgerjs/ilp-plugin-lightning.svg)](https://codecov.io/gh/interledgerjs/ilp-plugin-lightning)
-[![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
+[![CircleCI](https://img.shields.io/circleci/project/github/interledgerjs/ilp-plugin-lightning/master.svg)](https://circleci.com/gh/interledgerjs/ilp-plugin-lightning)
+[![Codecov](https://img.shields.io/codecov/c/github/interledgerjs/ilp-plugin-lightning/master.svg)](https://codecov.io/gh/interledgerjs/ilp-plugin-lightning)
+[![Prettier](https://img.shields.io/badge/code_style-prettier-brightgreen.svg)](https://prettier.io/)
 [![Apache 2.0 License](https://img.shields.io/github/license/interledgerjs/ilp-plugin-lightning.svg)](https://github.com/interledgerjs/ilp-plugin-lightning/blob/master/LICENSE)
 
 :rotating_light: **Expect breaking changes while this plugin is in beta.**
 
 ## Overview
 
-`ilp-plugin-lightning` enables settlements between Interledger peers using the [Lightning Network](https://lightning.network/) on Bitcoin. Using the [ILP/Stream](https://github.com/interledger/rfcs/blob/master/0029-stream/0029-stream.md) protocol, payments are chunked down into small increments, which can facilitate faster and more relaible payments compared with native Lightning &mdash; like AMP (atomic multipath payments), but it works today!
+`ilp-plugin-lightning` enables settlements between Interledger peers using the [Lightning Network](https://lightning.network/) on Bitcoin. Using the [ILP/Stream](https://github.com/interledger/rfcs/blob/master/0029-stream/0029-stream.md) protocol, payments are chunked down into small increments, which can facilitate faster and more relaible payments compared with native Lightning!
 
 The integration requires an existing Lightning node with connectivity to the greater Lightning network. Note that speed within the Lightning network degrades as two peers have more degrees of separation, and opening a direct channel provides a much faster experience.
 
@@ -96,7 +96,7 @@ const plugin = new LightningPlugin({
 
 The balance (positive) is the net amount the counterparty/peer owes an instance of the plugin. A negative balance implies the plugin owes money to the counterparty.
 
-Contrary to other plugins that require the balance middleware in [ilp-connector](https://github.com/interledgerjs/ilp-connector/) to trigger settlement, here, all the balance configuration is internal to the plugin. `sendMoney` is a no-operation on both the client and the server.
+Contrary to other plugins that require the balance middleware in [ilp-connector](https://github.com/interledgerjs/ilp-connector/) to trigger settlement, here, all the balance configuration is internal to the plugin. `sendMoney` is a no-operation on the server (but _may_ be used on the client if triggering settlements manually is preferred).
 
 Thus, pre-funding—sending money to the peer _before_ forwarding packets through them—requires a positive `settleTo` amount, and post-funding—settling _after_ forwarding packets through them—requires a 0 or negative `settleTo` amount.
 

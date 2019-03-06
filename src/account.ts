@@ -378,11 +378,17 @@ export default class LightningAccount extends EventEmitter2 {
     )
   }
 
+  unload() {
+    // Don't refresh existing invoices
+    this.outgoingInvoices.forEach(timer => clearTimeout(timer))
+    this.master._accounts.delete(this.accountName)
+  }
+
   /**
    * Generic plugin boilerplate (not specific to Lightning)
    */
 
-  private async attemptSettle(): Promise<void> {
+  async attemptSettle(): Promise<void> {
     /**
      * By default, the settleThreshold is -Infinity,
      * so it will never settle (receive-only mode)
@@ -527,7 +533,7 @@ export default class LightningAccount extends EventEmitter2 {
     }
   }
 
-  private addBalance(amount: BigNumber) {
+  addBalance(amount: BigNumber) {
     if (amount.isZero()) {
       return
     }
@@ -555,7 +561,7 @@ export default class LightningAccount extends EventEmitter2 {
     this.balance$.next(newBalance)
   }
 
-  private subBalance(amount: BigNumber) {
+  subBalance(amount: BigNumber) {
     if (amount.isZero()) {
       return
     }
@@ -581,9 +587,5 @@ export default class LightningAccount extends EventEmitter2 {
       }, new balance is ${format(newBalance, Unit.Satoshi)}`
     )
     this.balance$.next(newBalance)
-  }
-
-  unload() {
-    this.master._accounts.delete(this.accountName)
   }
 }
