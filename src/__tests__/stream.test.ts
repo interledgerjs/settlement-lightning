@@ -1,19 +1,25 @@
-import test from 'ava'
+import anyTest, { TestInterface } from 'ava'
 import BigNumber from 'bignumber.js'
 import getPort from 'get-port'
-import {
-  createConnection,
-  createServer,
-  DataAndMoneyStream
-} from 'ilp-protocol-stream'
-import { performance } from 'perf_hooks'
-import LightningPlugin, { connectLnd } from '..'
+import LightningPlugin, { connectLnd, LndService } from '..'
 import { convert, Unit } from '../account'
+import { createHash, randomBytes } from 'crypto'
+import { promisify } from 'util'
+import {
+  IlpPrepare,
+  IlpFulfill,
+  serializeIlpPrepare,
+  serializeIlpFulfill
+} from 'ilp-packet'
+import { base64url } from 'btp-packet'
 
-test('client streams data and money to server', async (t: any) => {
-  const AMOUNT_TO_SEND = convert(0.0002, Unit.BTC, Unit.Satoshi)
-  const SENDER_SETTLE_TO = convert('0.0001', Unit.BTC, Unit.Satoshi)
-  const RECEIVER_MAX_BALANCE = new BigNumber(0)
+const test = anyTest as TestInterface<{
+  clientLnd: LndService
+  clientPlugin: LightningPlugin
+  serverPlugin: LightningPlugin
+}>
+
+test.beforeEach(async t => {
   const port = await getPort()
 
   // Test independently creating the Lightning client to inject into the plugin
@@ -24,18 +30,13 @@ test('client streams data and money to server', async (t: any) => {
     grpcPort: parseInt(process.env.LND_GRPCPORT_C!, 10)
   })
 
-  // Sender plugin
+  const token = 'secret'
   const clientPlugin = new LightningPlugin({
     role: 'client',
-    server: `btp+ws://userC:secretC@localhost:${port}`,
-    lnd: clientLnd,
-    balance: {
-      settleTo: SENDER_SETTLE_TO,
-      settleThreshold: convert('0.00009', Unit.BTC, Unit.Satoshi)
-    }
+    server: `btp+ws://:${token}@localhost:${port}`,
+    lnd: clientLnd
   })
 
-  // Receiver plugin
   const serverPlugin = new LightningPlugin({
     role: 'server',
     port,
@@ -44,87 +45,120 @@ test('client streams data and money to server', async (t: any) => {
       assetScale: 8,
       clientAddress: 'private.btc'
     },
-    maxPacketAmount: convert(0.000005, Unit.BTC, Unit.Satoshi), // 500 Satoshi
     lnd: {
       tlsCert: process.env.LND_TLSCERT_B_BASE64!,
       macaroon: process.env.LND_MACAROON_B_BASE64!,
       hostname: process.env.LND_PEERHOST_B!,
       grpcPort: parseInt(process.env.LND_GRPCPORT_B!, 10)
-    },
-    balance: {
-      maximum: RECEIVER_MAX_BALANCE,
-      settleTo: 0,
-      settleThreshold: 0
     }
-  })
-
-  let actualReceived = new BigNumber(0)
-
-  const readyToSend = new Promise(resolve => {
-    clientPlugin.registerMoneyHandler(Promise.resolve)
-    serverPlugin.registerMoneyHandler(async (amount: string) => {
-      actualReceived = actualReceived.plus(amount)
-      resolve()
-    })
   })
 
   await serverPlugin.connect()
   await clientPlugin.connect()
 
-  // Wait for the client to finish prefunding
-  await readyToSend
+  t.context = {
+    clientLnd,
+    clientPlugin,
+    serverPlugin
+  }
+})
 
-  // Setup the receiver (Lightning server, Stream server)
-  const streamServer = await createServer({
-    plugin: serverPlugin,
-    receiveOnly: true
+test.afterEach(async t => {
+  const { clientLnd, clientPlugin, serverPlugin } = t.context
+
+  await serverPlugin.disconnect()
+  await clientPlugin.disconnect()
+
+  clientLnd.close()
+
+  clientPlugin.deregisterDataHandler()
+  serverPlugin.deregisterDataHandler()
+
+  clientPlugin.deregisterMoneyHandler()
+  serverPlugin.deregisterMoneyHandler()
+})
+
+test('money can be sent from client to server', async t => {
+  const PREFUND_AMOUNT = convert(0.0002, Unit.BTC, Unit.Satoshi)
+  const { clientPlugin, serverPlugin } = t.context
+
+  await new Promise(async resolve => {
+    serverPlugin.registerMoneyHandler(async amount => {
+      t.true(new BigNumber(amount).isEqualTo(PREFUND_AMOUNT))
+      resolve()
+    })
+
+    await t.notThrowsAsync(clientPlugin.sendMoney(PREFUND_AMOUNT.toString()))
+  })
+})
+
+test('money can be sent from server to client', async t => {
+  t.plan(4)
+
+  const PREFUND_AMOUNT = convert(0.0002, Unit.BTC, Unit.Satoshi)
+  const SEND_AMOUNT = convert(0.00014, Unit.BTC, Unit.Satoshi)
+
+  const { clientPlugin, serverPlugin } = t.context
+
+  serverPlugin.registerDataHandler(data => serverPlugin.sendData(data))
+
+  // Prefund the server
+  await new Promise(async resolve => {
+    serverPlugin.registerMoneyHandler(async amount => {
+      t.true(
+        new BigNumber(amount).isEqualTo(PREFUND_AMOUNT),
+        'server receives exactly the amount the client prefunded'
+      )
+      resolve()
+    })
+    await clientPlugin.sendMoney(PREFUND_AMOUNT.toString())
   })
 
-  const connProm = streamServer.acceptConnection()
+  await new Promise(async resolve => {
+    const destination = `private.btc.${base64url(
+      createHash('sha256')
+        .update('secret')
+        .digest()
+    )}`
+    const fulfillment = await promisify(randomBytes)(32)
+    const condition = createHash('sha256')
+      .update(fulfillment)
+      .digest()
 
-  // Setup the sender (Lightning client, Stream client)
-  const clientConn = await createConnection({
-    plugin: clientPlugin,
-    ...streamServer.generateAddressAndSecret()
-  })
+    const prepare: IlpPrepare = {
+      destination,
+      amount: SEND_AMOUNT.toString(),
+      executionCondition: condition,
+      expiresAt: new Date(Date.now() + 5000),
+      data: Buffer.alloc(0)
+    }
 
-  const clientStream = clientConn.createStream()
-  clientStream.setSendMax(AMOUNT_TO_SEND)
+    const fulfill: IlpFulfill = {
+      fulfillment,
+      data: Buffer.alloc(0)
+    }
 
-  const serverConn = await connProm
-  const serverStream = await new Promise<DataAndMoneyStream>(resolve => {
-    serverConn.once('stream', resolve)
-  })
+    clientPlugin.registerDataHandler(async data => {
+      t.true(
+        data.equals(serializeIlpPrepare(prepare)),
+        'server forwards PREPARE packet'
+      )
 
-  serverStream.on('money', () => {
-    const amountPrefunded = actualReceived.minus(serverConn.totalReceived)
+      clientPlugin.registerMoneyHandler(async amount => {
+        t.true(
+          new BigNumber(amount).isEqualTo(SEND_AMOUNT),
+          'server will send settlement to client for value of fulfilled packet'
+        )
+        resolve()
+      })
 
+      return serializeIlpFulfill(fulfill)
+    })
+
+    const reply = await clientPlugin.sendData(serializeIlpPrepare(prepare))
     t.true(
-      amountPrefunded.gte(RECEIVER_MAX_BALANCE),
-      'amount prefunded to server is always at least the max balance'
-    )
-    t.true(
-      amountPrefunded.lte(SENDER_SETTLE_TO),
-      'amount prefunded to server is never greater than settleTo amount'
+      reply.equals(serializeIlpFulfill(fulfill)),
+      'server returns FULFILL packet'
     )
   })
-
-  const start = performance.now()
-  await t.notThrowsAsync(
-    serverStream.receiveTotal(AMOUNT_TO_SEND, {
-      timeout: 360000
-    }),
-    'client streamed the total amount of packets to the server'
-  )
-  t.log(`time: ${performance.now() - start} ms`)
-
-  // Wait 1 seconds for sender to finish settling
-  await new Promise(r => setTimeout(r, 1000))
-
-  t.true(
-    actualReceived.gte(AMOUNT_TO_SEND),
-    'server received at least as much money as the client sent'
-  )
-
-  await clientConn.end()
 })
