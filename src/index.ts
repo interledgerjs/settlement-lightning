@@ -54,34 +54,6 @@ export interface LightningPluginOpts
   invoiceStream?: InvoiceStream
   /** Maximum allowed amount in satoshis for incoming packets (satoshis) */
   maxPacketAmount?: BigNumber.Value
-  /**
-   * Balance (positive) is amount in satoshis the counterparty owes this instance
-   * (negative balance implies this instance owes the counterparty)
-   * Debits add to the balance; credits subtract from the balance
-   * maximum >= settleTo > settleThreshold >= minimum (satoshis)
-   */
-  balance?: {
-    /**
-     * Maximum balance counterparty owes this instance before further balance additions are rejected
-     * e.g. settlements and forwarding of PREPARE packets with debits that increase balance above maximum would be rejected
-     */
-    maximum?: BigNumber.Value
-    /**
-     * New balance after settlement is triggered
-     * Since the balance will never exceed this following a settlement, it's almost a "max balance for settlements"
-     */
-    settleTo?: BigNumber.Value
-    /**
-     * Automatic settlement is triggered when balance goes below this threshold
-     * If undefined, no automated settlement occurs
-     */
-    settleThreshold?: BigNumber.Value
-    /**
-     * Maximum this instance owes the counterparty before further balance subtractions are rejected
-     * e.g. incoming money/claims and forwarding of FULFILL packets with credits that reduce balance below minimum would be rejected
-     */
-    minimum?: BigNumber.Value
-  }
 }
 
 export default class LightningPlugin extends EventEmitter2
@@ -92,12 +64,7 @@ export default class LightningPlugin extends EventEmitter2
   readonly _log: Logger
   readonly _store: Store
   readonly _maxPacketAmount: BigNumber
-  readonly _balance: {
-    minimum: BigNumber
-    maximum: BigNumber
-    settleTo: BigNumber
-    settleThreshold: BigNumber
-  }
+  readonly _maxBalance: BigNumber
   readonly _accounts = new Map<string, LightningAccount>() // accountName -> account
   readonly _plugin: LightningServerPlugin | LightningClientPlugin
   _dataHandler: DataHandler = defaultDataHandler
@@ -119,12 +86,6 @@ export default class LightningPlugin extends EventEmitter2
       paymentStream,
       invoiceStream,
       maxPacketAmount = Infinity,
-      balance: {
-        maximum = Infinity,
-        settleTo = 0,
-        settleThreshold = -Infinity,
-        minimum = -Infinity
-      } = {},
       ...opts
     }: LightningPluginOpts,
     { log, store = new MemoryStore() }: PluginServices = {}
@@ -152,48 +113,15 @@ export default class LightningPlugin extends EventEmitter2
       this._log.trace || debug(`ilp-plugin-lightning-${role}:trace`)
 
     this._maxPacketAmount = new BigNumber(maxPacketAmount)
-      .abs()
-      .dp(0, BigNumber.ROUND_DOWN)
+      .absoluteValue()
+      .decimalPlaces(0, BigNumber.ROUND_DOWN)
 
-    this._balance = {
-      maximum: new BigNumber(maximum).dp(0, BigNumber.ROUND_FLOOR),
-      settleTo: new BigNumber(settleTo).dp(0, BigNumber.ROUND_FLOOR),
-      settleThreshold: new BigNumber(settleThreshold).dp(
-        0,
-        BigNumber.ROUND_FLOOR
-      ),
-      minimum: new BigNumber(minimum).dp(0, BigNumber.ROUND_CEIL)
-    }
+    this._maxBalance = new BigNumber(role === 'client' ? Infinity : 0).dp(
+      0,
+      BigNumber.ROUND_FLOOR
+    )
 
-    if (this._balance.settleThreshold.eq(this._balance.minimum)) {
-      this._log.debug(
-        `Auto-settlement disabled: plugin is in receive-only mode`
-      )
-    }
-
-    // Validate balance configuration: max >= settleTo >= settleThreshold >= min
-    if (!this._balance.maximum.gte(this._balance.settleTo)) {
-      throw new Error(
-        'Invalid balance configuration: maximum balance must be greater than or equal to settleTo'
-      )
-    }
-    if (!this._balance.settleTo.gte(this._balance.settleThreshold)) {
-      throw new Error(
-        'Invalid balance configuration: settleTo must be greater than or equal to settleThreshold'
-      )
-    }
-    if (!this._balance.settleThreshold.gte(this._balance.minimum)) {
-      throw new Error(
-        'Invalid balance configuration: settleThreshold must be greater than or equal to minimum'
-      )
-    }
-    if (!this._balance.maximum.gt(this._balance.minimum)) {
-      throw new Error(
-        'Invalid balance configuration: maximum balance must be greater than minimum balance'
-      )
-    }
-
-    const loadAccount = (accountName: string) => this.loadAccount(accountName)
+    const loadAccount = (accountName: string) => this._loadAccount(accountName)
     const getAccount = (accountName: string) => {
       const account = this._accounts.get(accountName)
       if (!account) {
@@ -219,7 +147,7 @@ export default class LightningPlugin extends EventEmitter2
     this._plugin.on('error', e => this.emitAsync('error', e))
   }
 
-  async loadAccount(accountName: string): Promise<LightningAccount> {
+  async _loadAccount(accountName: string): Promise<LightningAccount> {
     /** Create a stream from the value in the store */
     const loadValue = async (key: string) => {
       const storeKey = `${accountName}:${key}`
@@ -233,7 +161,8 @@ export default class LightningPlugin extends EventEmitter2
       return subject
     }
 
-    const balance$ = await loadValue('balance')
+    const payableBalance$ = await loadValue('payableBalance')
+    const receivableBalance$ = await loadValue('receivableBalance')
     const payoutAmount$ = await loadValue('payoutAmount')
 
     // Account data must always be loaded from store before it's in the map
@@ -244,7 +173,8 @@ export default class LightningPlugin extends EventEmitter2
         dataHandler: (data: Buffer) => this._dataHandler(data),
         moneyHandler: (amount: string) => this._moneyHandler(amount),
         accountName,
-        balance$,
+        payableBalance$,
+        receivableBalance$,
         payoutAmount$,
         master: this
       })
@@ -283,7 +213,10 @@ export default class LightningPlugin extends EventEmitter2
 
   async disconnect() {
     await this._plugin.disconnect()
+
+    this._accounts.forEach(account => account.unload())
     this._accounts.clear()
+
     /**
      * Only disconnect if the service was created by the plugin.
      * If it was injected, don't automatically disconnect.
@@ -304,16 +237,7 @@ export default class LightningPlugin extends EventEmitter2
   async sendMoney(amount: string) {
     const peerAccount = this._accounts.get('peer')
     if (peerAccount) {
-      // If the plugin is acting as a client, enable sendMoney
-      peerAccount.subBalance(new BigNumber(amount))
-      peerAccount.payoutAmount$.next(
-        peerAccount.payoutAmount$.value.plus(amount)
-      )
-      peerAccount
-        .attemptSettle()
-        .catch(err =>
-          this._log.error(`Error during settlement: ${err.message}`)
-        )
+      return peerAccount.sendMoney(amount)
     } else {
       this._log.error(
         `sendMoney is not supported: use plugin balance configuration`

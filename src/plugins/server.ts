@@ -3,7 +3,7 @@ import MiniAccountsPlugin from 'ilp-plugin-mini-accounts'
 import { ServerOptions } from 'ws'
 import { IldcpResponse } from 'ilp-protocol-ildcp'
 import { BtpPacket, BtpSubProtocol } from 'ilp-plugin-btp'
-import { IlpPacket, IlpPrepare, Type } from 'ilp-packet'
+import { IlpPacket, IlpPrepare, Type, isPrepare } from 'ilp-packet'
 import LightningAccount from '../account'
 
 export interface MiniAccountsOpts {
@@ -62,13 +62,17 @@ export class LightningServerPlugin extends MiniAccountsPlugin
       data: IlpPrepare
     }
   ) => {
+    if (isPrepare(responsePacket.data)) {
+      throw new Error('Received PREPARE in response to PREPARE')
+    }
+
     return this.getAccount(destination).handlePrepareResponse(
-      preparePacket,
-      responsePacket
+      preparePacket.data,
+      responsePacket.data
     )
   }
 
-  async _close(destination: string) {
-    this.getAccount(destination).unload()
+  async _close(from: string): Promise<void> {
+    this.getAccount(from).unload()
   }
 }
