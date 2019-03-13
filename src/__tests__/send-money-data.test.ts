@@ -78,29 +78,17 @@ test.afterEach(async t => {
   serverPlugin.deregisterMoneyHandler()
 })
 
-test('money can be sent from client to server', async t => {
-  const PREFUND_AMOUNT = convert(0.0002, Unit.BTC, Unit.Satoshi)
-  const { clientPlugin, serverPlugin } = t.context
-
-  await new Promise(async resolve => {
-    serverPlugin.registerMoneyHandler(async amount => {
-      t.true(new BigNumber(amount).isEqualTo(PREFUND_AMOUNT))
-      resolve()
-    })
-
-    await t.notThrowsAsync(clientPlugin.sendMoney(PREFUND_AMOUNT.toString()))
-  })
-})
-
-test('money can be sent from server to client', async t => {
-  t.plan(4)
+test('sends money and data between clients and servers', async t => {
+  t.plan(6)
 
   const PREFUND_AMOUNT = convert(0.0002, Unit.BTC, Unit.Satoshi)
   const SEND_AMOUNT = convert(0.00014, Unit.BTC, Unit.Satoshi)
 
   const { clientPlugin, serverPlugin } = t.context
 
-  serverPlugin.registerDataHandler(data => serverPlugin.sendData(data))
+  clientPlugin.registerMoneyHandler(async () => {
+    t.fail(`server sent money to client when it wasn't supposed to`)
+  })
 
   // Prefund the server
   await new Promise(async resolve => {
@@ -111,7 +99,13 @@ test('money can be sent from server to client', async t => {
       )
       resolve()
     })
-    await clientPlugin.sendMoney(PREFUND_AMOUNT.toString())
+
+    await t.notThrowsAsync(clientPlugin.sendMoney(PREFUND_AMOUNT.toString()))
+  })
+
+  serverPlugin.deregisterMoneyHandler()
+  serverPlugin.registerMoneyHandler(async () => {
+    t.fail(`client sent money to the server when it wasn't supposed to`)
   })
 
   await new Promise(async resolve => {
@@ -138,12 +132,22 @@ test('money can be sent from server to client', async t => {
       data: Buffer.alloc(0)
     }
 
+    serverPlugin.registerDataHandler(data => {
+      t.true(
+        data.equals(serializeIlpPrepare(prepare)),
+        'server receives PREPARE from client'
+      )
+
+      return serverPlugin.sendData(data)
+    })
+
     clientPlugin.registerDataHandler(async data => {
       t.true(
         data.equals(serializeIlpPrepare(prepare)),
         'server forwards PREPARE packet'
       )
 
+      clientPlugin.deregisterMoneyHandler()
       clientPlugin.registerMoneyHandler(async amount => {
         t.true(
           new BigNumber(amount).isEqualTo(SEND_AMOUNT),
@@ -158,7 +162,7 @@ test('money can be sent from server to client', async t => {
     const reply = await clientPlugin.sendData(serializeIlpPrepare(prepare))
     t.true(
       reply.equals(serializeIlpFulfill(fulfill)),
-      'server returns FULFILL packet'
+      'server returns FULFILL packet to client'
     )
   })
 })
