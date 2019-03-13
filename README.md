@@ -1,10 +1,10 @@
 # Interledger Lightning Plugin
 
-[![NPM Package](https://img.shields.io/npm/v/ilp-plugin-lightning.svg?style=flat)](https://npmjs.org/package/ilp-plugin-lightning)
-[![CircleCI](https://img.shields.io/circleci/project/github/interledgerjs/ilp-plugin-lightning/master.svg)](https://circleci.com/gh/interledgerjs/ilp-plugin-lightning)
-[![Codecov](https://img.shields.io/codecov/c/github/interledgerjs/ilp-plugin-lightning/master.svg)](https://codecov.io/gh/interledgerjs/ilp-plugin-lightning)
-[![Prettier](https://img.shields.io/badge/code_style-prettier-brightgreen.svg)](https://prettier.io/)
-[![Apache 2.0 License](https://img.shields.io/github/license/interledgerjs/ilp-plugin-lightning.svg)](https://github.com/interledgerjs/ilp-plugin-lightning/blob/master/LICENSE)
+[![NPM Package](https://img.shields.io/npm/v/ilp-plugin-lightning.svg?style=flat-square&logo=npm)](https://npmjs.org/package/ilp-plugin-lightning)
+[![CircleCI](https://img.shields.io/circleci/project/github/interledgerjs/ilp-plugin-lightning/master.svg?style=flat-square&logo=circleci)](https://circleci.com/gh/interledgerjs/ilp-plugin-lightning/master)
+[![Codecov](https://img.shields.io/codecov/c/github/interledgerjs/ilp-plugin-lightning/master.svg?style=flat-square&logo=codecov)](https://codecov.io/gh/interledgerjs/ilp-plugin-lightning)
+[![Prettier](https://img.shields.io/badge/code_style-prettier-brightgreen.svg?style=flat-square)](https://prettier.io/)
+[![Apache 2.0 License](https://img.shields.io/github/license/interledgerjs/ilp-plugin-lightning.svg?style=flat-square)](https://github.com/interledgerjs/ilp-plugin-lightning/blob/master/LICENSE)
 
 :rotating_light: **Expect breaking changes while this plugin is in beta.**
 
@@ -27,6 +27,10 @@ Requires Node.js v8.10+.
 ## API
 
 Here are the available options to pass to the plugin. Additional configuration options are also inherited from [ilp-plugin-btp](https://github.com/interledgerjs/ilp-plugin-btp) if the plugin is a client, and [ilp-plugin-mini-accounts](https://github.com/interledgerjs/ilp-plugin-mini-accounts) if the plugin is a server.
+
+Clients do not settle automatically. Sending Lightning payments can be triggered by invoking `sendMoney` on the plugin, and the money handler is called upon receipt of incoming payments (set using `registerMoneyHandler`).
+
+The balance configuration has been simplified for servers. Clients must prefund before sending any packets through a server, and if a client fulfills packets sent to them through a server, the server will automatically settle such that they owe 0 to the client. This configuration was chosen as a default due to it's security and protection against deadlocks.
 
 #### `role`
 
@@ -91,44 +95,6 @@ const plugin = new LightningPlugin({
 - Type: [`BigNumber`](http://mikemcl.github.io/bignumber.js/), `number`, or `string`
 - Default: `Infinity`
 - Maximum amount in _satoshis_ above which an incoming ILP packet should be rejected
-
-#### `balance`
-
-The balance (positive) is the net amount the counterparty/peer owes an instance of the plugin. A negative balance implies the plugin owes money to the counterparty.
-
-Contrary to other plugins that require the balance middleware in [ilp-connector](https://github.com/interledgerjs/ilp-connector/) to trigger settlement, here, all the balance configuration is internal to the plugin. `sendMoney` is a no-operation on the server (but _may_ be used on the client if triggering settlements manually is preferred).
-
-Thus, pre-funding—sending money to the peer _before_ forwarding packets through them—requires a positive `settleTo` amount, and post-funding—settling _after_ forwarding packets through them—requires a 0 or negative `settleTo` amount.
-
-All the following balance options are in units of _satoshis_.
-
-##### `maximum`
-
-- Type: [`BigNumber`](http://mikemcl.github.io/bignumber.js/), `number`, or `string`
-- Default: `Infinity`
-- Maximum balance the counterparty owes this instance before further balance additions are rejected (e.g. settlements and forwarding of PREPARE packets with debits that increase balance above maximum the would be rejected)
-- Must be greater than or equal to settleTo amount
-
-##### `settleTo`
-
-- Type: [`BigNumber`](http://mikemcl.github.io/bignumber.js/), `number`, or `string`
-- Default: `0`
-- Settlement attempts will increase the balance to this amount
-- Must be greater than or equal to settleThreshold
-
-##### `settleThreshold`
-
-- Type: [`BigNumber`](http://mikemcl.github.io/bignumber.js/), `number`, or `string`
-- Default: `-Infinity`
-- Automatically attempts to settle when the balance drops below this threshold (exclusive)
-- By default, auto settlement is disabled, and the plugin is in receive-only mode
-- Must be greater than or equal to the minimum balance
-
-##### `minimum`
-
-- Type: [`BigNumber`](http://mikemcl.github.io/bignumber.js/), `number`, or `string`
-- Default: `-Infinity`
-- Maximum this instance owes the counterparty before further balance subtractions are rejected (e.g. incoming money/claims and forwarding of FULFILL packets with credits that reduce balance below minimum would be rejected)
 
 ## Bilateral Communication
 

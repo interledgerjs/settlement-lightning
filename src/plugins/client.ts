@@ -1,4 +1,4 @@
-import LightningAccount, { requestId } from '../account'
+import LightningAccount, { generateBtpRequestId } from '../account'
 import BtpPlugin, {
   BtpPacket,
   BtpSubProtocol,
@@ -6,7 +6,11 @@ import BtpPlugin, {
 } from 'ilp-plugin-btp'
 import { TYPE_MESSAGE, MIME_APPLICATION_OCTET_STREAM } from 'btp-packet'
 import { PluginInstance, PluginServices } from '../types/plugin'
-import { deserializeIlpPacket, Type } from 'ilp-packet'
+import {
+  deserializeIlpReply,
+  isPrepare,
+  deserializeIlpPrepare
+} from 'ilp-packet'
 
 export interface LightningClientOpts extends IlpPluginBtpConstructorOptions {
   getAccount: (accountName: string) => LightningAccount
@@ -44,14 +48,14 @@ export class LightningClientPlugin extends BtpPlugin implements PluginInstance {
   // Add hooks into sendData before and after sending a packet for
   // balance updates and settlement, akin to mini-accounts
   async sendData(buffer: Buffer): Promise<Buffer> {
-    const preparePacket = deserializeIlpPacket(buffer)
-    if (preparePacket.type !== Type.TYPE_ILP_PREPARE) {
+    const prepare = deserializeIlpPrepare(buffer)
+    if (!isPrepare(prepare)) {
       throw new Error('Packet must be a PREPARE')
     }
 
     const response = await this._call('', {
       type: TYPE_MESSAGE,
-      requestId: await requestId(),
+      requestId: await generateBtpRequestId(),
       data: {
         protocolData: [
           {
@@ -67,12 +71,15 @@ export class LightningClientPlugin extends BtpPlugin implements PluginInstance {
       p => p.protocolName === 'ilp'
     )
     if (ilpResponse) {
-      const responsePacket = deserializeIlpPacket(ilpResponse.data)
-      this.getAccount().handlePrepareResponse(preparePacket, responsePacket)
+      const reply = deserializeIlpReply(ilpResponse.data)
+      this.getAccount().handlePrepareResponse(prepare, reply)
       return ilpResponse.data
     }
 
-    // TODO Should this return a REJECT packet?
     return Buffer.alloc(0)
+  }
+
+  async _disconnect(): Promise<void> {
+    this.getAccount().unload()
   }
 }

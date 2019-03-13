@@ -11,9 +11,11 @@ import {
   deserializeIlpPrepare,
   Errors,
   errorToReject,
-  IlpPacket,
   IlpPrepare,
-  Type
+  isReject,
+  isFulfill,
+  IlpReply,
+  deserializeIlpReply
 } from 'ilp-packet'
 import { BtpPacket, BtpPacketData, BtpSubProtocol } from 'ilp-plugin-btp'
 import pTimes from 'p-times'
@@ -57,33 +59,40 @@ export const getSubProtocol = (
   }
 }
 
-export const requestId = async () =>
+export const generateBtpRequestId = async () =>
   (await promisify(randomBytes)(4)).readUInt32BE(0)
 
 export default class LightningAccount extends EventEmitter2 {
   /** Hash/account identifier in ILP address */
   readonly accountName: string
+
+  /** Incoming amount owed to us by our peer for their packets we've forwarded */
+  readonly receivableBalance$: BehaviorSubject<BigNumber>
+
+  /** Outgoing amount owed by us to our peer for packets we've sent to them */
+  readonly payableBalance$: BehaviorSubject<BigNumber>
+
   /**
-   * Net amount in satoshi the counterparty owes the this instance
-   * - Negative implies this instance owes the counterparty
-   */
-  readonly balance$: BehaviorSubject<BigNumber>
-  /**
-   * Sum of all fulfilled packets owed to the counterparty that have yet to be paid out (always >= 0
-   * - The balance limits when settlements happen, but this limits the settlement amount so we don't send
-   *   all the clients' money directly back to them!
+   * Amount of failed outgoing settlements that is owed to the peer, but not reflected
+   * in the payableBalance (e.g. due to sendMoney calls on client)
    */
   readonly payoutAmount$: BehaviorSubject<BigNumber>
+
   /** Lightning public key linked for the session */
   peerIdentityPublicKey?: string
+
   /** Expose access to common configuration across accounts */
   private readonly master: LightningPlugin
+
   /** Send the given BTP packet message to this counterparty */
   private readonly sendMessage: (message: BtpPacket) => Promise<BtpPacketData>
+
   /** Data handler from plugin for incoming ILP packets */
   private readonly dataHandler: DataHandler
+
   /** Money handler from plugin for incoming money */
   private readonly moneyHandler: MoneyHandler
+
   /**
    * Requests that this instance pays the the peer/counterparty, to be paid in FIFO order
    * - Cached for duration of session
@@ -93,12 +102,15 @@ export default class LightningAccount extends EventEmitter2 {
     paymentHash: string
     expiry: number // UNIX timestamp denoting when the invoice expires in LND (seconds)
   }[] = []
+
   /**
    * Requests that the peer/counterparty pays this instance
    * - Mapping of paymentRequest to a timer to send a new invoice before this one expires
    * - Cached for duration of session
    */
+
   private outgoingInvoices = new Map<string, NodeJS.Timeout>()
+
   /**
    * Promise that resolves when plugin is ready to send messages
    * (workaroud since mini-accounts doesn't allow messsages to be sent within `_connect`)
@@ -107,7 +119,8 @@ export default class LightningAccount extends EventEmitter2 {
 
   constructor({
     accountName,
-    balance$,
+    payableBalance$,
+    receivableBalance$,
     payoutAmount$,
     master,
     sendMessage,
@@ -115,7 +128,8 @@ export default class LightningAccount extends EventEmitter2 {
     moneyHandler
   }: {
     accountName: string
-    balance$: BehaviorSubject<BigNumber>
+    payableBalance$: BehaviorSubject<BigNumber>
+    receivableBalance$: BehaviorSubject<BigNumber>
     payoutAmount$: BehaviorSubject<BigNumber>
     master: LightningPlugin
     // Wrap _call/expose method to send WS messages
@@ -132,7 +146,8 @@ export default class LightningAccount extends EventEmitter2 {
 
     this.accountName = accountName
 
-    this.balance$ = balance$
+    this.payableBalance$ = payableBalance$
+    this.receivableBalance$ = receivableBalance$
     this.payoutAmount$ = payoutAmount$
   }
 
@@ -227,7 +242,7 @@ export default class LightningAccount extends EventEmitter2 {
       })
 
       // Since there is a new invoice, attempt settlement
-      this.attemptSettle().catch(err =>
+      this.sendMoney().catch(err =>
         this.master._log.error(`Error during settlement: ${err.message}`)
       )
     }
@@ -251,7 +266,7 @@ export default class LightningAccount extends EventEmitter2 {
 
     await this.sendMessage({
       type: TYPE_MESSAGE,
-      requestId: await requestId(),
+      requestId: await generateBtpRequestId(),
       data: {
         protocolData: [
           {
@@ -303,7 +318,7 @@ export default class LightningAccount extends EventEmitter2 {
 
     await this.sendMessage({
       type: TYPE_MESSAGE,
-      requestId: await requestId(),
+      requestId: await generateBtpRequestId(),
       data: {
         protocolData: [
           {
@@ -333,13 +348,16 @@ export default class LightningAccount extends EventEmitter2 {
       this.outgoingInvoices.delete(paymentRequest)
 
       this.master._log.info(
-        `received incoming payment for ${format(
+        `Received incoming payment for ${format(
           invoice.getAmtPaidSat(),
           Unit.Satoshi
         )}`
       )
 
-      this.subBalance(new BigNumber(invoice.getAmtPaidSat()))
+      this.receivableBalance$.next(
+        this.receivableBalance$.value.minus(invoice.getAmtPaidSat())
+      )
+
       this.moneyHandler(invoice.getAmtPaidSat().toString()).catch(err =>
         this.master._log.error(`Error in money handler: ${err.message}`)
       )
@@ -355,27 +373,71 @@ export default class LightningAccount extends EventEmitter2 {
     }
   }
 
-  private async sendMoney(amount: BigNumber): Promise<void> {
-    // Prune invoices that expire within the next minute
-    const minuteFromNow = Date.now() / 1000 + 60 // Unix timestamp for 1 minute from now
-    this.incomingInvoices = this.incomingInvoices.filter(
-      ({ expiry }) => minuteFromNow < expiry
-    )
+  async sendMoney(amount?: string): Promise<void> {
+    const amountToSend = amount || BigNumber.max(0, this.payableBalance$.value)
+    this.payoutAmount$.next(this.payoutAmount$.value.plus(amountToSend))
 
-    // Get the oldest invoice as the one to pay
-    // Remove it immediately so we don't pay it twice
-    const invoice = this.incomingInvoices.shift()
-    if (!invoice) {
-      throw new Error('no valid cached invoices to pay')
+    const settlementBudget = this.payoutAmount$.value
+    if (settlementBudget.isLessThanOrEqualTo(0)) {
+      return
     }
 
-    const { paymentRequest, paymentHash } = invoice
-    await payInvoice(
-      this.master._paymentStream!,
-      paymentRequest,
-      paymentHash,
-      amount
+    this.payableBalance$.next(
+      this.payableBalance$.value.minus(settlementBudget)
     )
+
+    // payoutAmount$ is positive and CANNOT go below 0
+    this.payoutAmount$.next(
+      BigNumber.min(0, this.payoutAmount$.value.minus(settlementBudget))
+    )
+
+    try {
+      // Prune invoices that expire within the next minute
+      const minuteFromNow = Date.now() / 1000 + 60 // Unix timestamp for 1 minute from now
+      this.incomingInvoices = this.incomingInvoices.filter(
+        ({ expiry }) => minuteFromNow < expiry
+      )
+
+      // Get the oldest invoice as the one to pay
+      // Remove it immediately so we don't pay it twice
+      const invoice = this.incomingInvoices.shift()
+      if (!invoice) {
+        throw new Error('no valid cached invoices to pay')
+      }
+
+      this.master._log.debug(
+        `Settlement triggered with ${this.accountName} for ${format(
+          settlementBudget,
+          Unit.Satoshi
+        )}`
+      )
+
+      const { paymentRequest, paymentHash } = invoice
+      await payInvoice(
+        this.master._paymentStream!,
+        paymentRequest,
+        paymentHash,
+        settlementBudget
+      )
+
+      this.master._log.info(
+        `Successfully settled with ${this.peerIdentityPublicKey} for ${format(
+          amountToSend,
+          Unit.Satoshi
+        )}`
+      )
+    } catch (err) {
+      this.payableBalance$.next(
+        this.payableBalance$.value.plus(settlementBudget)
+      )
+
+      // payoutAmount$ is positive and CANNOT go below 0
+      this.payoutAmount$.next(
+        BigNumber.max(0, this.payoutAmount$.value.plus(settlementBudget))
+      )
+
+      this.master._log.error('Failed to settle:', err)
+    }
   }
 
   unload() {
@@ -387,63 +449,6 @@ export default class LightningAccount extends EventEmitter2 {
   /**
    * Generic plugin boilerplate (not specific to Lightning)
    */
-
-  async attemptSettle(): Promise<void> {
-    /**
-     * By default, the settleThreshold is -Infinity,
-     * so it will never settle (receive-only mode)
-     */
-    const shouldSettle = this.master._balance.settleThreshold.gt(
-      this.balance$.getValue()
-    )
-    if (!shouldSettle) {
-      return
-    }
-
-    /**
-     * Determine the amount to settle for, always limited
-     * by the total amount of packets we've fulfilled
-     */
-    const settlementBudget = this.master._balance.settleTo.plus(
-      this.payoutAmount$.getValue()
-    )
-    if (settlementBudget.lte(0)) {
-      return
-    }
-
-    // TODO Would this ever go above the maximum balance (after change)?
-    // This should never error, since settleTo < maximum
-    this.addBalance(settlementBudget)
-    this.payoutAmount$.next(
-      this.payoutAmount$.getValue().minus(settlementBudget)
-    )
-
-    this.master._log.debug(
-      `Settlement triggered with ${this.accountName} for ${format(
-        settlementBudget,
-        Unit.Satoshi
-      )}`
-    )
-
-    // After this point, any uncaught or thrown error should revert balance
-    try {
-      await this.sendMoney(settlementBudget)
-
-      this.master._log.info(
-        `Successfully settled with ${this.peerIdentityPublicKey} for ${format(
-          settlementBudget,
-          Unit.Satoshi
-        )}`
-      )
-    } catch (err) {
-      this.subBalance(settlementBudget)
-      this.payoutAmount$.next(
-        this.payoutAmount$.getValue().plus(settlementBudget)
-      )
-
-      this.master._log.error(`Failed to settle: ${err.message}`)
-    }
-  }
 
   private async handlePrepare(data: Buffer) {
     try {
@@ -457,20 +462,44 @@ export default class LightningAccount extends EventEmitter2 {
         })
       }
 
-      try {
-        this.addBalance(amountBN)
-      } catch (err) {
-        this.master._log.trace(`Failed to forward PREPARE: ${err.message}`)
-        throw new Errors.InsufficientLiquidityError(err.message)
+      const newBalance = this.receivableBalance$.value.plus(amount)
+      if (newBalance.isGreaterThan(this.master._maxBalance)) {
+        this.master._log.debug(
+          `Cannot forward PREPARE: cannot debit ${format(
+            amount,
+            Unit.Satoshi
+          )}: proposed balance of ${format(
+            newBalance,
+            Unit.Satoshi
+          )} exceeds maximum of ${format(
+            this.master._maxBalance,
+            Unit.Satoshi
+          )}`
+        )
+        throw new Errors.InsufficientLiquidityError('Exceeded maximum balance')
       }
 
-      const response = await this.dataHandler(data)
+      this.master._log.debug(
+        `Forwarding PREPARE: Debited ${format(
+          amount,
+          Unit.Satoshi
+        )}, new balance is ${format(newBalance, Unit.Satoshi)}`
+      )
+      this.receivableBalance$.next(newBalance)
 
-      if (response[0] === Type.TYPE_ILP_REJECT) {
-        this.subBalance(amountBN)
-      } else if (response[0] === Type.TYPE_ILP_FULFILL) {
-        this.master._log.trace(
-          `Received FULFILL from data handler in response to forwarded PREPARE`
+      const response = await this.dataHandler(data)
+      const reply = deserializeIlpReply(response)
+
+      if (isReject(reply)) {
+        this.master._log.debug(
+          `Credited ${format(amount, Unit.Satoshi)} in response to REJECT`
+        )
+        this.receivableBalance$.next(
+          this.receivableBalance$.value.minus(amount)
+        )
+      } else if (isFulfill(reply)) {
+        this.master._log.debug(
+          `Received FULFILL in response to forwarded PREPARE`
         )
       }
 
@@ -493,99 +522,31 @@ export default class LightningAccount extends EventEmitter2 {
   }
 
   // Handle the response from a forwarded ILP PREPARE
-  handlePrepareResponse(
-    preparePacket: {
-      type: Type.TYPE_ILP_PREPARE
-      typeString?: 'ilp_prepare'
-      data: IlpPrepare
-    },
-    responsePacket: IlpPacket
-  ): void {
-    const isFulfill = responsePacket.type === Type.TYPE_ILP_FULFILL
-    if (isFulfill) {
-      this.master._log.trace(
-        `Received a FULFILL in response to the forwarded PREPARE from sendData`
-      )
-
+  handlePrepareResponse(prepare: IlpPrepare, reply: IlpReply) {
+    if (isFulfill(reply)) {
       // Update balance to reflect that we owe them the amount of the FULFILL
-      const amount = new BigNumber(preparePacket.data.amount)
-      try {
-        this.subBalance(amount)
-        this.payoutAmount$.next(this.payoutAmount$.getValue().plus(amount))
-      } catch (err) {
-        // Balance update likely dropped below the minimum, so throw an internal error
-        this.master._log.error(
-          `Failed to fulfill response to PREPARE: ${err.message}`
-        )
-        throw new Errors.InternalError(err.message)
-      }
+      const amount = new BigNumber(prepare.amount)
+
+      this.master._log.debug(
+        `Received a FULFILL in response to forwarded PREPARE: credited ${format(
+          amount,
+          Unit.Satoshi
+        )}`
+      )
+      this.payableBalance$.next(this.payableBalance$.value.plus(amount))
+    } else if (isReject(reply)) {
+      this.master._log.debug(
+        `Received a ${reply.code} REJECT in response to the forwarded PREPARE`
+      )
     }
 
-    // Attempt to settle on fulfills and* T04s (to resolve stalemates)
+    // Attempt to settle on fulfills *and* T04s (to resolve stalemates)
     const shouldSettle =
-      isFulfill ||
-      (responsePacket.type === Type.TYPE_ILP_REJECT &&
-        responsePacket.data.code === 'T04')
+      isFulfill(reply) || (isReject(reply) && reply.code === 'T04')
     if (shouldSettle) {
-      this.attemptSettle().catch(err =>
-        this.master._log.error(`Error during settlement: ${err.message}`)
+      this.sendMoney().catch((err: Error) =>
+        this.master._log.debug(`Error during settlement: ${err.message}`)
       )
     }
-  }
-
-  addBalance(amount: BigNumber) {
-    if (amount.isZero()) {
-      return
-    }
-
-    const maximum = this.master._balance.maximum
-    const newBalance = this.balance$.getValue().plus(amount)
-
-    if (newBalance.gt(maximum)) {
-      throw new Error(
-        `Cannot debit ${format(amount, Unit.Satoshi)} from ${
-          this.accountName
-        }, ` +
-          `proposed balance of ${format(
-            newBalance,
-            Unit.Satoshi
-          )} exceeds maximum of ${format(maximum, Unit.Satoshi)}`
-      )
-    }
-
-    this.master._log.debug(
-      `Debited ${format(amount, Unit.Satoshi)} from ${
-        this.accountName
-      }, new balance is ${format(newBalance, Unit.Satoshi)}`
-    )
-    this.balance$.next(newBalance)
-  }
-
-  subBalance(amount: BigNumber) {
-    if (amount.isZero()) {
-      return
-    }
-
-    const minimum = this.master._balance.minimum
-    const newBalance = this.balance$.getValue().minus(amount)
-
-    if (newBalance.lt(minimum)) {
-      throw new Error(
-        `Cannot credit ${format(amount, Unit.Satoshi)} to account ${
-          this.accountName
-        }, ` +
-          `proposed balance of ${format(
-            newBalance,
-            Unit.Satoshi
-          )} is below minimum of ${format(minimum, Unit.Satoshi)}`
-      )
-    }
-
-    this.master._log.debug(
-      `Credited ${format(amount, Unit.Satoshi)} to ${
-        this.accountName
-      }, new balance is ${format(newBalance, Unit.Satoshi)}`
-    )
-    this.balance$.next(newBalance)
   }
 }
