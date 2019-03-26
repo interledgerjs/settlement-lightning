@@ -112,6 +112,12 @@ export default class LightningAccount extends EventEmitter2 {
   private outgoingInvoices = new Map<string, NodeJS.Timeout>()
 
   /**
+   * Binding to the internal invoice handler for incoming payments
+   * (on the instance so it the listener can be removed from the event emitter later)
+   */
+  private invoiceHandler = (data: Invoice) => this.handleIncomingPayment(data)
+
+  /**
    * Promise that resolves when plugin is ready to send messages
    * (workaroud since mini-accounts doesn't allow messsages to be sent within `_connect`)
    */
@@ -152,9 +158,7 @@ export default class LightningAccount extends EventEmitter2 {
   }
 
   async connect() {
-    this.master._invoiceStream!.on('data', (data: Invoice) =>
-      this.handleIncomingPayment(data)
-    )
+    this.master._invoiceStream!.on('data', this.invoiceHandler)
 
     // Don't block the rest of connect from returning (for mini-accounts)
     this.isConnected
@@ -374,7 +378,10 @@ export default class LightningAccount extends EventEmitter2 {
   }
 
   async sendMoney(amount?: string): Promise<void> {
+    // Must always be >= 0, assuming amount is >= 0
     const amountToSend = amount || BigNumber.max(0, this.payableBalance$.value)
+
+    // Since payoutAmount is positive, this must always be positive
     this.payoutAmount$.next(this.payoutAmount$.value.plus(amountToSend))
 
     const settlementBudget = this.payoutAmount$.value
@@ -388,7 +395,7 @@ export default class LightningAccount extends EventEmitter2 {
 
     // payoutAmount$ is positive and CANNOT go below 0
     this.payoutAmount$.next(
-      BigNumber.min(0, this.payoutAmount$.value.minus(settlementBudget))
+      BigNumber.max(0, this.payoutAmount$.value.minus(settlementBudget))
     )
 
     try {
@@ -441,6 +448,9 @@ export default class LightningAccount extends EventEmitter2 {
   }
 
   unload() {
+    this.removeAllListeners()
+    this.master._invoiceStream!.off('data', this.invoiceHandler)
+
     // Don't refresh existing invoices
     this.outgoingInvoices.forEach(timer => clearTimeout(timer))
     this.master._accounts.delete(this.accountName)

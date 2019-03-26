@@ -29,16 +29,18 @@ export class LightningClientPlugin extends BtpPlugin implements PluginInstance {
 
     this.getAccount = () => getAccount('peer')
     this.loadAccount = () => loadAccount('peer')
+
+    this.on('disconnect', () => this.getAccount().unload())
+
+    this.on('connect', async () => {
+      const account = await this.loadAccount()
+      account.emit('connected')
+      return account.connect()
+    })
   }
 
   _sendMessage(accountName: string, message: BtpPacket) {
     return this._call('', message)
-  }
-
-  async _connect(): Promise<void> {
-    const account = await this.loadAccount()
-    account.emit('connected')
-    return account.connect()
   }
 
   _handleData(from: string, message: BtpPacket): Promise<BtpSubProtocol[]> {
