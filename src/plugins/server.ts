@@ -39,17 +39,18 @@ export class LightningServerPlugin extends MiniAccountsPlugin
     return this._call(this._prefix + accountName, message)
   }
 
-  async _connect(address: string, message: BtpPacket): Promise<void> {
-    const account = await this.loadAccount(address)
-    return account.connect()
-  }
-
   _handleCustomData = async (
     from: string,
     message: BtpPacket
   ): Promise<BtpSubProtocol[]> => {
-    const account = this.getAccount(from)
-    account.emit('connected')
+    let account: LightningAccount
+    try {
+      account = this.getAccount(from)
+    } catch (err) {
+      account = await this.loadAccount(from)
+      await account.connect()
+    }
+
     return account.handleData(message)
   }
 
@@ -69,6 +70,12 @@ export class LightningServerPlugin extends MiniAccountsPlugin
     return this.getAccount(destination).handlePrepareResponse(
       preparePacket.data,
       responsePacket.data
+    )
+  }
+
+  async sendMoney() {
+    throw new Error(
+      'sendMoney is not supported: use plugin balance configuration'
     )
   }
 

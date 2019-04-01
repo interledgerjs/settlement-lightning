@@ -1,22 +1,28 @@
-import BigNumber from 'bignumber.js'
-import { createHash } from 'crypto'
-import * as grpc from 'grpc'
-import pify from 'pify'
-import { PromisifySome } from './types/promisify'
-import { LightningClient } from '../generated/rpc_grpc_pb'
+import { credentials } from '@grpc/grpc-js'
 import {
-  ConnectPeerRequest,
-  Invoice,
-  InvoiceSubscription,
-  LightningAddress,
-  SendRequest,
-  SendResponse
-} from '../generated/rpc_pb'
+  ClientDuplexStream,
+  ClientReadableStream
+} from '@grpc/grpc-js/build/src/call'
+import {
+  CallCredentials,
+  CallMetadataGenerator
+} from '@grpc/grpc-js/build/src/call-credentials'
+import {
+  makeClientConstructor,
+  ServiceClient
+} from '@grpc/grpc-js/build/src/make-client'
+import { Metadata } from '@grpc/grpc-js/build/src/metadata'
+import BigNumber from 'bignumber.js'
+import { util } from 'protobufjs'
+import { lnrpc } from '../generated/rpc'
+import { createHash } from 'crypto'
 
-// Re-export all compiled gRPC message types
-export * from '../generated/rpc_pb'
+/** Re-export all compiled gRPC message types */
+export * from '../generated/rpc'
 
-export interface LndOpts {
+/** Create a generic gRPC client */
+
+export interface GrpcConnectionOpts {
   /** TLS cert as a Base64-encoded string or Buffer (e.g. using `fs.readFile`) */
   tlsCert: string | Buffer
   /** LND macaroon as a Base64-encoded string or Buffer (e.g. using `fs.readFile`) */
@@ -27,17 +33,12 @@ export interface LndOpts {
   grpcPort?: number
 }
 
-export type LndService = PromisifySome<
-  LightningClient,
-  'sendPayment' | 'subscribeInvoices' | 'close'
->
-
-export const connectLnd = ({
+export const createGrpcClient = ({
   tlsCert,
   macaroon,
   hostname,
   grpcPort = 10009
-}: LndOpts): LndService => {
+}: GrpcConnectionOpts): ServiceClient => {
   /**
    * Required for SSL handshake with LND
    * https://grpc.io/grpc/core/md_doc_environment_variables.html
@@ -54,47 +55,93 @@ export const connectLnd = ({
     macaroon = Buffer.from(macaroon, 'base64')
   }
 
-  let macaroonCreds: grpc.CallCredentials
+  let macaroonCreds: CallCredentials
   try {
-    const metadata = new grpc.Metadata()
+    const metadata = new Metadata()
     metadata.add('macaroon', macaroon.toString('hex'))
-    macaroonCreds = grpc.credentials.createFromMetadataGenerator(
-      (_, callback) => {
-        callback(null, metadata)
-      }
+    const metadataGenerator: CallMetadataGenerator = (_, callback) => {
+      callback(null, metadata)
+    }
+
+    macaroonCreds = CallCredentials.createFromMetadataGenerator(
+      metadataGenerator
     )
   } catch (err) {
     throw new Error(`Macaroon is not properly formatted: ${err.message}`)
   }
 
   const address = hostname + ':' + grpcPort
-  const tlsCreds = grpc.credentials.createSsl(tlsCert)
-  const credentials = grpc.credentials.combineChannelCredentials(
+  const tlsCreds = credentials.createSsl(tlsCert)
+  const channelCredentials = credentials.combineChannelCredentials(
     tlsCreds,
     macaroonCreds
   )
 
-  // Promisify the Lightning client: sayonara callbacks! ;)
-  return pify(new LightningClient(address, credentials), {
-    exclude: ['sendPayment', 'subscribeInvoices', 'close']
-  })
+  const Client = makeClientConstructor({}, '')
+  return new Client(address, channelCredentials)
 }
+
+/** Wrap a gRPC client in a Lightning RPC service with typed methods and messages */
+
+export type LndService = lnrpc.Lightning
+
+export const createLnrpc = (client: ServiceClient) =>
+  new lnrpc.Lightning({
+    unaryCall(method, requestData, callback) {
+      client.makeUnaryRequest(
+        getMethodPath(method.name),
+        arg => Buffer.from(arg),
+        arg => Buffer.from(arg),
+        requestData,
+        callback
+      )
+    },
+    serverStreamCall(method, requestData, decode) {
+      return (client.makeServerStreamRequest(
+        getMethodPath(method.name),
+        arg => Buffer.from(arg),
+        decode,
+        requestData
+      ) as unknown) as util.EventEmitter
+    },
+    clientStreamCall(method, encode, decode) {
+      return (client.makeClientStreamRequest(
+        getMethodPath(method.name),
+        arg => Buffer.from(encode(arg)),
+        decode,
+        () => {
+          return
+        }
+      ) as unknown) as util.EventEmitter
+    },
+    bidiStreamCall(method, encode, decode) {
+      return (client.makeBidiStreamRequest(
+        getMethodPath(method.name),
+        arg => Buffer.from(encode(arg)),
+        decode
+      ) as unknown) as util.EventEmitter
+    }
+  })
+
+const getMethodPath = (methodName: string) => `/lnrpc.Lightning/${methodName}`
 
 /* Create streams to send outgoing and handle incoming invoices */
 
-export type InvoiceStream = grpc.ClientReadableStream<Invoice>
+export type InvoiceStream = ClientReadableStream<lnrpc.IInvoice>
 
-export const createInvoiceStream = (lightning: LndService): InvoiceStream => {
-  const requestInvoiceSub = new InvoiceSubscription()
-  requestInvoiceSub.setAddIndex(0)
-  requestInvoiceSub.setSettleIndex(0)
-  return lightning.subscribeInvoices(requestInvoiceSub)
-}
+export const createInvoiceStream = (lightning: LndService): InvoiceStream =>
+  lightning.subscribeInvoices({
+    addIndex: 0,
+    settleIndex: 0
+  })
 
 export const createPaymentRequest = async (lightning: LndService) =>
-  (await lightning.addInvoice(new Invoice())).getPaymentRequest()
+  (await lightning.addInvoice({})).paymentRequest
 
-export type PaymentStream = grpc.ClientDuplexStream<SendRequest, SendResponse>
+export type PaymentStream = ClientDuplexStream<
+  lnrpc.SendRequest,
+  lnrpc.SendResponse
+>
 
 export const createPaymentStream = (lightning: LndService): PaymentStream =>
   lightning.sendPayment()
@@ -109,11 +156,12 @@ export const payInvoice = async (
   paymentHash: string,
   amount: BigNumber
 ) => {
-  const request = new SendRequest()
-  request.setPaymentRequest(paymentRequest)
-  request.setAmt(amount.toNumber())
-
-  const didSerialize = paymentStream.write(request)
+  const didSerialize = paymentStream.write(
+    new lnrpc.SendRequest({
+      amt: amount.toNumber(),
+      paymentRequest
+    })
+  )
   if (!didSerialize) {
     throw new Error(`failed to serialize outgoing payment`)
   }
@@ -123,8 +171,8 @@ export const payInvoice = async (
    * Disregard messages that don't correspond to this invoice
    */
   await new Promise((resolve, reject) => {
-    const handler = (data: SendResponse) => {
-      let somePaymentHash = data.getPaymentHash()
+    const handler = (data: lnrpc.SendResponse) => {
+      let somePaymentHash = data.paymentHash
       /**
        * Returning the `payment_hash` in the response was merged into
        * lnd@master on 12/10/18, so many nodes may not support it yet:
@@ -132,18 +180,19 @@ export const payInvoice = async (
        *
        * (if not, fallback to generating the hash from the preimage)
        */
-      if (typeof somePaymentHash === 'string') {
-        somePaymentHash = sha256(data.getPaymentPreimage())
+      if (!somePaymentHash) {
+        somePaymentHash = sha256(data.paymentPreimage)
       }
 
       const isThisInvoice =
+        somePaymentHash &&
         paymentHash === Buffer.from(somePaymentHash).toString('hex')
       if (!isThisInvoice) {
         return
       }
 
       // The invoice was not paid and it's safe to undo the balance update
-      const error = data.getPaymentError()
+      const error = data.paymentError
       if (error) {
         paymentStream.removeListener('data', handler)
         return reject(`error sending payment: ${error}`)
@@ -157,10 +206,6 @@ export const payInvoice = async (
   })
 }
 
-/** Wait for the connection/channel to the LND node to be fully established */
-export const waitForReady = (lightning: LndService) =>
-  lightning.waitForReady(Date.now() + 10000)
-
 /** Ensure that this instance is peered with the given Lightning node, throw if not */
 export const connectPeer = (lightning: LndService) => async (
   /** Identity public key of the Lightning node to peer with */
@@ -168,27 +213,27 @@ export const connectPeer = (lightning: LndService) => async (
   /** Network location of the Lightning node to peer with, e.g. `69.69.69.69:1337` or `localhost:10011` */
   peerHost: string
 ) => {
-  const peerAddress = new LightningAddress()
-  peerAddress.setHost(peerHost)
-  peerAddress.setPubkey(peerIdentityPubkey)
-
-  const request = new ConnectPeerRequest()
-  request.setAddr(peerAddress)
-
   /**
    * LND throws if it failed to connect:
    * https://github.com/lightningnetwork/lnd/blob/f55e81a2d422d34181ea2a6579e5fcc0296386c2/rpcserver.go#L952
    */
-  await lightning.connectPeer(request).catch((err: { details: string }) => {
-    /**
-     * Don't throw if we're already connected, akin to:
-     * https://github.com/lightningnetwork/lnd/blob/8c5d6842c2ea7234512d3fb0ddc69d51c8026c74/lntest/harness.go#L428
-     */
-    const alreadyConnected = err.details.includes('already connected to peer')
-    if (!alreadyConnected) {
-      throw err
-    }
-  })
+  await lightning
+    .connectPeer({
+      addr: {
+        pubkey: peerIdentityPubkey,
+        host: peerHost
+      }
+    })
+    .catch((err: { details: string }) => {
+      /**
+       * Don't throw if we're already connected, akin to:
+       * https://github.com/lightningnetwork/lnd/blob/8c5d6842c2ea7234512d3fb0ddc69d51c8026c74/lntest/harness.go#L428
+       */
+      const alreadyConnected = err.details.includes('already connected to peer')
+      if (!alreadyConnected) {
+        throw err
+      }
+    })
 }
 
 const sha256 = (preimage: string | Uint8Array | Buffer) =>

@@ -63,3 +63,6 @@ generated/
 
 # Editor configs
 .vscode/
+
+# Mac-specific
+.DS_Store

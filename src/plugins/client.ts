@@ -29,16 +29,26 @@ export class LightningClientPlugin extends BtpPlugin implements PluginInstance {
 
     this.getAccount = () => getAccount('peer')
     this.loadAccount = () => loadAccount('peer')
+
+    // If the websocket drops, unload the account
+    this.on('disconnect', () => this.getAccount().unload())
+
+    // Peer and re-share invoices if the websocket reconnects
+    this.on('connect', () => this._connect())
+  }
+
+  async _connect() {
+    try {
+      // If the account is loaded, assume it's connected
+      this.getAccount()
+    } catch (err) {
+      const account = await this.loadAccount()
+      return account.connect()
+    }
   }
 
   _sendMessage(accountName: string, message: BtpPacket) {
     return this._call('', message)
-  }
-
-  async _connect(): Promise<void> {
-    const account = await this.loadAccount()
-    account.emit('connected')
-    return account.connect()
   }
 
   _handleData(from: string, message: BtpPacket): Promise<BtpSubProtocol[]> {
@@ -79,7 +89,7 @@ export class LightningClientPlugin extends BtpPlugin implements PluginInstance {
     return Buffer.alloc(0)
   }
 
-  async _disconnect(): Promise<void> {
-    this.getAccount().unload()
+  sendMoney(amount: string) {
+    return this.getAccount().sendMoney(amount)
   }
 }

@@ -1,7 +1,7 @@
 import anyTest, { TestInterface } from 'ava'
 import BigNumber from 'bignumber.js'
 import getPort from 'get-port'
-import LightningPlugin, { connectLnd, LndService } from '..'
+import LightningPlugin from '..'
 import { convert, Unit } from '../account'
 import { createHash, randomBytes } from 'crypto'
 import { promisify } from 'util'
@@ -14,7 +14,6 @@ import {
 import { base64url } from 'btp-packet'
 
 const test = anyTest as TestInterface<{
-  clientLnd: LndService
   clientPlugin: LightningPlugin
   serverPlugin: LightningPlugin
 }>
@@ -22,19 +21,16 @@ const test = anyTest as TestInterface<{
 test.beforeEach(async t => {
   const port = await getPort()
 
-  // Test independently creating the Lightning client to inject into the plugin
-  const clientLnd = connectLnd({
-    tlsCert: process.env.LND_TLSCERT_C_BASE64!,
-    macaroon: process.env.LND_MACAROON_C_BASE64!,
-    hostname: process.env.LND_PEERHOST_C!,
-    grpcPort: parseInt(process.env.LND_GRPCPORT_C!, 10)
-  })
-
   const token = 'secret'
   const clientPlugin = new LightningPlugin({
     role: 'client',
     server: `btp+ws://:${token}@localhost:${port}`,
-    lnd: clientLnd
+    lnd: {
+      tlsCert: process.env.LND_TLSCERT_C_BASE64!,
+      macaroon: process.env.LND_MACAROON_C_BASE64!,
+      hostname: process.env.LND_PEERHOST_C!,
+      grpcPort: parseInt(process.env.LND_GRPCPORT_C!, 10)
+    }
   })
 
   const serverPlugin = new LightningPlugin({
@@ -57,19 +53,16 @@ test.beforeEach(async t => {
   await clientPlugin.connect()
 
   t.context = {
-    clientLnd,
     clientPlugin,
     serverPlugin
   }
 })
 
 test.afterEach(async t => {
-  const { clientLnd, clientPlugin, serverPlugin } = t.context
+  const { clientPlugin, serverPlugin } = t.context
 
   await serverPlugin.disconnect()
   await clientPlugin.disconnect()
-
-  clientLnd.close()
 
   clientPlugin.deregisterDataHandler()
   serverPlugin.deregisterDataHandler()

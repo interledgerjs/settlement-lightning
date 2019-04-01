@@ -17,6 +17,11 @@ export interface PluginInstance extends EventEmitter2 {
   sendAdminInfo?(info: object): Promise<object>
 }
 
+export interface PluginServices {
+  log?: Logger
+  store?: Store
+}
+
 export interface Logger {
   info(...msg: any[]): void
   warn(...msg: any[]): void
@@ -31,7 +36,18 @@ export interface Store {
   del: (key: string) => Promise<void>
 }
 
-export interface PluginServices {
-  log?: Logger
-  store?: Store
+export class MemoryStore implements Store {
+  private _store = new Map<string, string>()
+
+  async get(k: string) {
+    return this._store.get(k)
+  }
+
+  async put(k: string, v: string) {
+    this._store.set(k, v)
+  }
+
+  async del(k: string) {
+    this._store.delete(k)
+  }
 }
