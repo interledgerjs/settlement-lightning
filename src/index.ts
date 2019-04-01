@@ -1,33 +1,35 @@
-import LightningAccount from './account'
+import { waitForClientReady } from '@grpc/grpc-js'
 import BigNumber from 'bignumber.js'
 import { registerProtocolNames } from 'btp-packet'
 import debug from 'debug'
 import { EventEmitter2 } from 'eventemitter2'
 import createLogger from 'ilp-logger'
 import { BtpPacket, IlpPluginBtpConstructorOptions } from 'ilp-plugin-btp'
+import { BehaviorSubject } from 'rxjs'
+import { promisify } from 'util'
+import LightningAccount from './account'
+import {
+  createGrpcClient,
+  createInvoiceStream,
+  createLnrpc,
+  createPaymentStream,
+  GrpcConnectionOpts,
+  InvoiceStream,
+  LndService,
+  PaymentStream,
+  GrpcClient
+} from './lightning'
 import { LightningClientPlugin } from './plugins/client'
 import { LightningServerPlugin, MiniAccountsOpts } from './plugins/server'
 import {
-  connectLnd,
-  LndService,
-  LndOpts,
-  waitForReady,
-  PaymentStream,
-  InvoiceStream,
-  createPaymentStream,
-  createInvoiceStream
-} from './lightning'
-import { MemoryStore } from './utils/store'
-import {
   DataHandler,
   Logger,
+  MemoryStore,
   MoneyHandler,
   PluginInstance,
   PluginServices,
   Store
 } from './types/plugin'
-import { BehaviorSubject } from 'rxjs'
-import { GetInfoRequest } from '../generated/rpc_pb'
 
 // Re-export Lightning related-services
 export * from './lightning'
@@ -48,10 +50,21 @@ const defaultMoneyHandler: MoneyHandler = () => {
 export interface LightningPluginOpts
   extends MiniAccountsOpts,
     IlpPluginBtpConstructorOptions {
+  /**
+   * "client" to connect to a single peer or parent server that is explicity specified
+   * "server" to enable multiple clients to openly connect to the plugin
+   */
   role: 'client' | 'server'
-  lnd: LndOpts | LndService
+
+  /** Config to connection to a gRPC server, or an already-constructed LND service */
+  lnd: GrpcConnectionOpts | LndService
+
+  /** Bidirectional streaming RPC to send outgoing payments and receive attestations */
   paymentStream?: PaymentStream
+
+  /** Streaming RPC of newly added or settled invoices */
   invoiceStream?: InvoiceStream
+
   /** Maximum allowed amount in satoshis for incoming packets (satoshis) */
   maxPacketAmount?: BigNumber.Value
 }
@@ -59,8 +72,6 @@ export interface LightningPluginOpts
 export default class LightningPlugin extends EventEmitter2
   implements PluginInstance {
   static readonly version = 2
-  readonly _lightning: LndService
-  readonly _serviceIsInternal: boolean
   readonly _log: Logger
   readonly _store: Store
   readonly _maxPacketAmount: BigNumber
@@ -69,10 +80,19 @@ export default class LightningPlugin extends EventEmitter2
   readonly _plugin: LightningServerPlugin | LightningClientPlugin
   _dataHandler: DataHandler = defaultDataHandler
   _moneyHandler: MoneyHandler = defaultMoneyHandler
+
+  /** gRPC client for raw RPC calls */
+  readonly _grpcClient?: GrpcClient
+
+  /** Wrapper around gRPC client for the Lightning RPC service, with typed methods and messages */
+  readonly _lightning: LndService
+
   /** Bidirectional streaming RPC to send outgoing payments and receive attestations */
   _paymentStream?: PaymentStream
+
   /** Streaming RPC of newly added or settled invoices */
   _invoiceStream?: InvoiceStream
+
   /**
    * Unique identififer and host the Lightning node of this instance:
    * [identityPubKey]@[hostname]:[port]
@@ -97,12 +117,18 @@ export default class LightningPlugin extends EventEmitter2
      * externally or pass in the credentials, and the plugin
      * will create it for them.
      */
-    const isLndOpts = (o: any): o is LndOpts =>
+    const isConnectionOpts = (o: any): o is GrpcConnectionOpts =>
       (typeof o.tlsCert === 'string' || Buffer.isBuffer(o.tlsCert)) &&
       (typeof o.macaroon === 'string' || Buffer.isBuffer(o.macaroon)) &&
       typeof o.hostname === 'string'
-    this._serviceIsInternal = isLndOpts(lnd)
-    this._lightning = isLndOpts(lnd) ? connectLnd(lnd) : lnd
+
+    if (isConnectionOpts(lnd)) {
+      this._grpcClient = createGrpcClient(lnd)
+      this._lightning = createLnrpc(this._grpcClient)
+    } else {
+      this._lightning = lnd
+    }
+
     this._paymentStream = paymentStream
     this._invoiceStream = invoiceStream
 
@@ -187,11 +213,13 @@ export default class LightningPlugin extends EventEmitter2
   }
 
   async connect() {
-    await waitForReady(this._lightning)
+    if (this._grpcClient) {
+      await promisify(waitForClientReady)(this._grpcClient, Date.now() + 10000)
+    }
 
     // Fetch public key & host for peering directly from LND
-    const response = await this._lightning.getInfo(new GetInfoRequest())
-    this._lightningAddress = response.getUrisList()[0]
+    const response = await this._lightning.getInfo({})
+    this._lightningAddress = response.uris[0]
 
     /*
      * Create only a single HTTP/2 stream per-plugin for
@@ -217,12 +245,8 @@ export default class LightningPlugin extends EventEmitter2
     this._accounts.forEach(account => account.unload())
     this._accounts.clear()
 
-    /**
-     * Only disconnect if the service was created by the plugin.
-     * If it was injected, don't automatically disconnect.
-     */
-    if (this._serviceIsInternal) {
-      this._lightning.close()
+    if (this._grpcClient) {
+      this._grpcClient.close()
     }
   }
 
@@ -230,19 +254,12 @@ export default class LightningPlugin extends EventEmitter2
     return this._plugin.isConnected()
   }
 
-  async sendData(data: Buffer) {
+  sendData(data: Buffer) {
     return this._plugin.sendData(data)
   }
 
-  async sendMoney(amount: string) {
-    const peerAccount = this._accounts.get('peer')
-    if (peerAccount) {
-      return peerAccount.sendMoney(amount)
-    } else {
-      this._log.error(
-        `sendMoney is not supported: use plugin balance configuration`
-      )
-    }
+  sendMoney(amount: string) {
+    return this._plugin.sendMoney(amount)
   }
 
   registerDataHandler(dataHandler: DataHandler) {

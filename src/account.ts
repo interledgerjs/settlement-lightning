@@ -1,30 +1,27 @@
 import BigNumber from 'bignumber.js'
-import { decode as decodeInvoice } from 'bolt11'
 import {
   MIME_APPLICATION_OCTET_STREAM,
   MIME_TEXT_PLAIN_UTF8,
   TYPE_MESSAGE
 } from 'btp-packet'
 import { randomBytes } from 'crypto'
-import { EventEmitter2 } from 'eventemitter2'
 import {
   deserializeIlpPrepare,
+  deserializeIlpReply,
   Errors,
   errorToReject,
   IlpPrepare,
-  isReject,
-  isFulfill,
   IlpReply,
-  deserializeIlpReply
+  isFulfill,
+  isReject
 } from 'ilp-packet'
 import { BtpPacket, BtpPacketData, BtpSubProtocol } from 'ilp-plugin-btp'
-import pTimes from 'p-times'
+import { BehaviorSubject } from 'rxjs'
 import { promisify } from 'util'
 import LightningPlugin from '.'
-import { Invoice } from '../generated/rpc_pb'
-import { DataHandler, MoneyHandler } from './types/plugin'
+import { lnrpc } from '../generated/rpc'
 import { connectPeer, createPaymentRequest, payInvoice } from './lightning'
-import { BehaviorSubject } from 'rxjs'
+import { DataHandler, MoneyHandler } from './types/plugin'
 
 // Used to denominate which asset scale we are using
 export enum Unit {
@@ -62,7 +59,7 @@ export const getSubProtocol = (
 export const generateBtpRequestId = async () =>
   (await promisify(randomBytes)(4)).readUInt32BE(0)
 
-export default class LightningAccount extends EventEmitter2 {
+export default class LightningAccount {
   /** Hash/account identifier in ILP address */
   readonly accountName: string
 
@@ -100,7 +97,7 @@ export default class LightningAccount extends EventEmitter2 {
   private incomingInvoices: {
     paymentRequest: string
     paymentHash: string
-    expiry: number // UNIX timestamp denoting when the invoice expires in LND (seconds)
+    expiry: BigNumber // UNIX timestamp denoting when the invoice expires in LND (seconds)
   }[] = []
 
   /**
@@ -112,10 +109,11 @@ export default class LightningAccount extends EventEmitter2 {
   private outgoingInvoices = new Map<string, NodeJS.Timeout>()
 
   /**
-   * Promise that resolves when plugin is ready to send messages
-   * (workaroud since mini-accounts doesn't allow messsages to be sent within `_connect`)
+   * Binding to the internal invoice handler for incoming payments
+   * (on the instance so it the listener can be removed from the event emitter later)
    */
-  private isConnected = new Promise(r => this.once('connected', r))
+  private invoiceHandler = (data: lnrpc.IInvoice) =>
+    this.handleIncomingPayment(data)
 
   constructor({
     accountName,
@@ -137,8 +135,6 @@ export default class LightningAccount extends EventEmitter2 {
     dataHandler: DataHandler
     moneyHandler: MoneyHandler
   }) {
-    super()
-
     this.master = master
     this.sendMessage = sendMessage
     this.dataHandler = dataHandler
@@ -152,19 +148,16 @@ export default class LightningAccount extends EventEmitter2 {
   }
 
   async connect() {
-    this.master._invoiceStream!.on('data', (data: Invoice) =>
+    this.master._invoiceStream!.on('data', (data: lnrpc.IInvoice) =>
       this.handleIncomingPayment(data)
     )
 
-    // Don't block the rest of connect from returning (for mini-accounts)
-    this.isConnected
-      .then(async () => {
-        await this.sendPeeringInfo()
-        await pTimes(20, () => this.sendInvoice())
-      })
-      .catch(err =>
-        this.master._log.error(`Error on connect handshake: ${err.message}`)
-      )
+    await this.sendPeeringInfo()
+
+    // Send 10 invoices ahead of time so the peer has the ability to pay us
+    for (const _ of [...Array(10)]) {
+      await this.sendInvoice()
+    }
   }
 
   async handleData({ data }: BtpPacket): Promise<BtpSubProtocol[]> {
@@ -199,9 +192,15 @@ export default class LightningAccount extends EventEmitter2 {
     const paymentRequest = getSubProtocol(data, 'paymentRequest')
     if (typeof paymentRequest === 'string') {
       // Throws if the invoice wasn't signed correctly
-      const { satoshis, payeeNodeKey, timestamp, tags } = decodeInvoice(
-        paymentRequest
-      )
+      const {
+        numSatoshis,
+        destination,
+        timestamp,
+        paymentHash,
+        expiry
+      } = await this.master._lightning.decodePayReq({
+        payReq: paymentRequest
+      })
 
       if (!this.peerIdentityPublicKey) {
         throw new Error(
@@ -210,35 +209,26 @@ export default class LightningAccount extends EventEmitter2 {
       }
 
       // Payee = entity to whom money is paid (the peer)
-      const toPeer = payeeNodeKey === this.peerIdentityPublicKey
+      const toPeer = destination === this.peerIdentityPublicKey
       if (!toPeer) {
         throw new Error(
-          `Invalid incoming invoice: ${payeeNodeKey} does not match the peer's public key: ${
+          `Invalid incoming invoice: ${destination} does not match the peer's public key: ${
             this.peerIdentityPublicKey
           }`
         )
       }
 
-      const anyAmount = satoshis === null
+      const anyAmount = new BigNumber(numSatoshis.toString()).isZero()
       if (!anyAmount) {
         throw new Error(
-          `Invalid incoming invoice: amount of ${satoshis} does not allow paying an arbitrary amount`
+          `Invalid incoming invoice: amount of ${numSatoshis} does not allow paying an arbitrary amount`
         )
       }
 
-      const paymentHash = tags.find(({ tagName }) => tagName === 'payment_hash')
-      if (!paymentHash) {
-        throw new Error(`Invalid incoming invoice: no payment hash provided`)
-      }
-
-      const expireTag = tags.find(({ tagName }) => tagName === 'expire_time')
-      // Default expiry per BOLT11 spec is 1 hour / 3600 seconds
-      const expiry = (expireTag ? expireTag.data : 3600) + timestamp
-
       this.incomingInvoices.push({
         paymentRequest,
-        paymentHash: paymentHash.data,
-        expiry
+        paymentHash,
+        expiry: new BigNumber(expiry.toString()).plus(timestamp.toString())
       })
 
       // Since there is a new invoice, attempt settlement
@@ -337,28 +327,30 @@ export default class LightningAccount extends EventEmitter2 {
    * Send settlements and credit incoming settlements
    */
 
-  private handleIncomingPayment(invoice: Invoice) {
-    const paymentRequest = invoice.getPaymentRequest()
+  private handleIncomingPayment({
+    paymentRequest,
+    amtPaidSat,
+    settled
+  }: lnrpc.IInvoice) {
+    if (!paymentRequest || !amtPaidSat || !settled) {
+      return
+    }
 
-    const isPaid = invoice.getSettled()
+    const isPaid = settled
     const isLinkedToAccount = this.outgoingInvoices.has(paymentRequest)
 
     if (isPaid && isLinkedToAccount) {
       clearTimeout(this.outgoingInvoices.get(paymentRequest)!) // Remove expiry timer to replace this invoice
       this.outgoingInvoices.delete(paymentRequest)
 
+      const amount = amtPaidSat.toString()
       this.master._log.info(
-        `Received incoming payment for ${format(
-          invoice.getAmtPaidSat(),
-          Unit.Satoshi
-        )}`
+        `Received incoming payment for ${format(amount, Unit.Satoshi)}`
       )
 
-      this.receivableBalance$.next(
-        this.receivableBalance$.value.minus(invoice.getAmtPaidSat())
-      )
+      this.receivableBalance$.next(this.receivableBalance$.value.minus(amount))
 
-      this.moneyHandler(invoice.getAmtPaidSat().toString()).catch(err =>
+      this.moneyHandler(amount).catch(err =>
         this.master._log.error(`Error in money handler: ${err.message}`)
       )
 
@@ -393,9 +385,9 @@ export default class LightningAccount extends EventEmitter2 {
 
     try {
       // Prune invoices that expire within the next minute
-      const minuteFromNow = Date.now() / 1000 + 60 // Unix timestamp for 1 minute from now
-      this.incomingInvoices = this.incomingInvoices.filter(
-        ({ expiry }) => minuteFromNow < expiry
+      const minuteFromNow = new BigNumber(Date.now()).dividedBy(1000).plus(60) // Unix timestamp for 1 minute from now
+      this.incomingInvoices = this.incomingInvoices.filter(({ expiry }) =>
+        minuteFromNow.isLessThan(expiry)
       )
 
       // Get the oldest invoice as the one to pay
@@ -441,6 +433,8 @@ export default class LightningAccount extends EventEmitter2 {
   }
 
   unload() {
+    this.master._invoiceStream!.off('data', this.invoiceHandler)
+
     // Don't refresh existing invoices
     this.outgoingInvoices.forEach(timer => clearTimeout(timer))
     this.master._accounts.delete(this.accountName)
