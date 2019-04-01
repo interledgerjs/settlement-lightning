@@ -22,6 +22,8 @@ export * from '../generated/rpc'
 
 /** Create a generic gRPC client */
 
+export type GrpcClient = ServiceClient
+
 export interface GrpcConnectionOpts {
   /** TLS cert as a Base64-encoded string or Buffer (e.g. using `fs.readFile`) */
   tlsCert: string | Buffer
@@ -38,7 +40,7 @@ export const createGrpcClient = ({
   macaroon,
   hostname,
   grpcPort = 10009
-}: GrpcConnectionOpts): ServiceClient => {
+}: GrpcConnectionOpts): GrpcClient => {
   /**
    * Required for SSL handshake with LND
    * https://grpc.io/grpc/core/md_doc_environment_variables.html
@@ -85,7 +87,7 @@ export const createGrpcClient = ({
 
 export type LndService = lnrpc.Lightning
 
-export const createLnrpc = (client: ServiceClient) =>
+export const createLnrpc = (client: GrpcClient) =>
   new lnrpc.Lightning({
     unaryCall(method, requestData, callback) {
       client.makeUnaryRequest(
