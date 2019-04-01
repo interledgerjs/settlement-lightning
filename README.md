@@ -22,7 +22,7 @@ Additional information on the Lightning Network is available [here](https://dev.
 npm install ilp-plugin-lightning
 ```
 
-Requires Node.js v8.10+.
+Requires Node.js 10+.
 
 ## API
 
