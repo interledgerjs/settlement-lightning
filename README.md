@@ -95,9 +95,9 @@ This plugin uses the [Bilateral Transfer Protocol](https://github.com/interledge
 
 #### `peeringRequest`
 
-- Format: `[Identity public key]@[hostname]:[port]`, UTF-8 encoded
-- Used for sharing peering information of our Lightning node with the peer
-- The receiver of the message will subsequently attempt to peer over the Lightning network
+- Format: `[Identity public key]`, UTF-8 encoded
+- Used for sharing pubkey of our Lightning node with the peer
+- Only shares pubkey, does not attempt to peer over the Lightning network
 
 #### `paymentRequest`
 
