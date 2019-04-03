@@ -20,7 +20,7 @@ import { BehaviorSubject } from 'rxjs'
 import { promisify } from 'util'
 import LightningPlugin from '.'
 import { lnrpc } from '../generated/rpc'
-import { connectPeer, createPaymentRequest, payInvoice } from './lightning'
+import {createPaymentRequest, payInvoice } from './lightning'
 import { DataHandler, MoneyHandler } from './types/plugin'
 
 // Used to denominate which asset scale we are using
@@ -179,8 +179,6 @@ export default class LightningAccount {
         this.master._log.debug(
           `Attempting to peer over Lightning with ${identityPublicKey}`
         )
-
-        await connectPeer(this.master._lightning)(identityPublicKey, host)
 
         this.peerIdentityPublicKey = identityPublicKey
         this.master._log.info(`Successfully peered with ${identityPublicKey}`)
