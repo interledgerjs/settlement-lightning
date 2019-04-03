@@ -219,7 +219,7 @@ export default class LightningPlugin extends EventEmitter2
 
     // Fetch public key & host for peering directly from LND
     const response = await this._lightning.getInfo({})
-    this._lightningAddress = response.uris[0]
+    this._lightningAddress = response.identityPubkey
 
     /*
      * Create only a single HTTP/2 stream per-plugin for
