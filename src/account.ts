@@ -176,12 +176,7 @@ export default class LightningAccount {
           )
         }
 
-        this.master._log.debug(
-          `Attempting to peer over Lightning with ${identityPublicKey}`
-        )
-
         this.peerIdentityPublicKey = identityPublicKey
-        this.master._log.info(`Successfully peered with ${identityPublicKey}`)
       } catch (err) {
         throw new Error(`Failed to add peer: ${err.message}`)
       }
