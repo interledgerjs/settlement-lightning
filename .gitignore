@@ -58,8 +58,9 @@ typings/
 .env
 
 # Compiled javascript
-build/
+dist/
 generated/
+lnd/
 
 # Editor configs
 .vscode/

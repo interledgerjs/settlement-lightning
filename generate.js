@@ -8,7 +8,7 @@ async function run() {
     .then(
       data =>
         // Import stream types from grpc-js
-        `import { ClientReadableStream, ClientDuplexStream } from "@grpc/grpc-js/build/src/call"\n` +
+        `import { ClientReadableStream, ClientDuplexStream } from "@grpc/grpc-js"\n` +
         data
           // Fix types provide RPC implementation with streaming
           .split('rpcImpl: $protobuf.RPCImpl')

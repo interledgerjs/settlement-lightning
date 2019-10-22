@@ -1,45 +1,39 @@
-import { credentials } from '@grpc/grpc-js'
-import {
-  ClientDuplexStream,
-  ClientReadableStream
-} from '@grpc/grpc-js/build/src/call'
 import {
   CallCredentials,
-  CallMetadataGenerator
-} from '@grpc/grpc-js/build/src/call-credentials'
-import {
+  Client,
+  ClientDuplexStream,
+  ClientReadableStream,
+  credentials,
   makeClientConstructor,
-  ServiceClient
-} from '@grpc/grpc-js/build/src/make-client'
-import { Metadata } from '@grpc/grpc-js/build/src/metadata'
-import BigNumber from 'bignumber.js'
+  Metadata
+} from '@grpc/grpc-js'
+import { createHash } from 'crypto'
 import { util } from 'protobufjs'
 import { lnrpc } from '../generated/rpc'
-import { createHash } from 'crypto'
-
-/** Re-export all compiled gRPC message types */
-export * from '../generated/rpc'
 
 /** Create a generic gRPC client */
 
-export type GrpcClient = ServiceClient
+export type GrpcClient = Client
 
 export interface GrpcConnectionOpts {
   /** TLS cert as a Base64-encoded string or Buffer (e.g. using `fs.readFile`) */
   tlsCert: string | Buffer
+
   /** LND macaroon as a Base64-encoded string or Buffer (e.g. using `fs.readFile`) */
   macaroon: string | Buffer
-  /** IP address of the Lightning node */
-  hostname: string
+
+  /** IP address or host of the Lightning node */
+  hostname?: string
+
   /** Port of LND gRPC server */
-  grpcPort?: number
+  port?: string | number
 }
 
 export const createGrpcClient = ({
   tlsCert,
   macaroon,
-  hostname,
-  grpcPort = 10009
+  hostname = 'localhost',
+  port = 10009
 }: GrpcConnectionOpts): GrpcClient => {
   /**
    * Required for SSL handshake with LND
@@ -61,7 +55,7 @@ export const createGrpcClient = ({
   try {
     const metadata = new Metadata()
     metadata.add('macaroon', macaroon.toString('hex'))
-    const metadataGenerator: CallMetadataGenerator = (_, callback) => {
+    const metadataGenerator = (_: any, callback: any) => {
       callback(null, metadata)
     }
 
@@ -72,7 +66,8 @@ export const createGrpcClient = ({
     throw new Error(`Macaroon is not properly formatted: ${err.message}`)
   }
 
-  const address = hostname + ':' + grpcPort
+  port = typeof port === 'string' ? parseInt(port, 10) : port
+  const address = hostname + ':' + port
   const tlsCreds = credentials.createSsl(tlsCert)
   const channelCredentials = credentials.combineChannelCredentials(
     tlsCreds,
@@ -137,9 +132,6 @@ export const createInvoiceStream = (lightning: LndService): InvoiceStream =>
     settleIndex: 0
   })
 
-export const createPaymentRequest = async (lightning: LndService) =>
-  (await lightning.addInvoice({})).paymentRequest
-
 export type PaymentStream = ClientDuplexStream<
   lnrpc.SendRequest,
   lnrpc.SendResponse
@@ -148,22 +140,19 @@ export type PaymentStream = ClientDuplexStream<
 export const createPaymentStream = (lightning: LndService): PaymentStream =>
   lightning.sendPayment()
 
+interface PayInvoiceRequest extends lnrpc.ISendRequest {
+  paymentHash: Buffer
+}
+
 /**
  * Pay a given request using a bidirectional streaming RPC.
- * Throw if it failed to pay the invoice
+ * Reject if it failed to pay the invoice
  */
 export const payInvoice = async (
   paymentStream: PaymentStream,
-  paymentRequest: string,
-  paymentHash: string,
-  amount: BigNumber
+  request: PayInvoiceRequest
 ) => {
-  const didSerialize = paymentStream.write(
-    new lnrpc.SendRequest({
-      amt: amount.toNumber(),
-      paymentRequest
-    })
-  )
+  const didSerialize = paymentStream.write(new lnrpc.SendRequest(request))
   if (!didSerialize) {
     throw new Error(`failed to serialize outgoing payment`)
   }
@@ -174,21 +163,7 @@ export const payInvoice = async (
    */
   await new Promise((resolve, reject) => {
     const handler = (data: lnrpc.SendResponse) => {
-      let somePaymentHash = data.paymentHash
-      /**
-       * Returning the `payment_hash` in the response was merged into
-       * lnd@master on 12/10/18, so many nodes may not support it yet:
-       * https://github.com/lightningnetwork/lnd/pull/2033
-       *
-       * (if not, fallback to generating the hash from the preimage)
-       */
-      if (!somePaymentHash) {
-        somePaymentHash = sha256(data.paymentPreimage)
-      }
-
-      const isThisInvoice =
-        somePaymentHash &&
-        paymentHash === Buffer.from(somePaymentHash).toString('hex')
+      const isThisInvoice = request.paymentHash.equals(data.paymentHash)
       if (!isThisInvoice) {
         return
       }
@@ -209,12 +184,12 @@ export const payInvoice = async (
 }
 
 /** Ensure that this instance is peered with the given Lightning node, throw if not */
-export const connectPeer = (lightning: LndService) => async (
-  /** Identity public key of the Lightning node to peer with */
-  peerIdentityPubkey: string,
-  /** Network location of the Lightning node to peer with, e.g. `69.69.69.69:1337` or `localhost:10011` */
-  peerHost: string
+export const connectPeer = async (
+  lightning: LndService,
+  peerAddress: string
 ) => {
+  const [peerIdentityPubkey, peerHost] = peerAddress.split('@')
+
   /**
    * LND throws if it failed to connect:
    * https://github.com/lightningnetwork/lnd/blob/f55e81a2d422d34181ea2a6579e5fcc0296386c2/rpcserver.go#L952
@@ -238,7 +213,7 @@ export const connectPeer = (lightning: LndService) => async (
     })
 }
 
-const sha256 = (preimage: string | Uint8Array | Buffer) =>
+export const sha256 = (preimage: string | Uint8Array | Buffer) =>
   createHash('sha256')
     .update(preimage)
     .digest()
