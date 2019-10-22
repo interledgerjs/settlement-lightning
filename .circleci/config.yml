@@ -25,7 +25,9 @@ jobs:
           command: npm run build
       - run:
           name: Run tests
-          command: npm test
+          command: |
+            ./start-test-env.sh
+            npm test
       - run:
           name: Lint files
           command: npm run lint
