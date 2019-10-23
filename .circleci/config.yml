@@ -2,11 +2,18 @@ version: 2
 
 jobs:
   build:
-    docker:
-      - image: circleci/node:10
+    machine:
+      - image: ubuntu-1604:201903-01
     working_directory: ~/repo
     steps:
       - checkout
+      - run:
+          name: Install Node.js
+          command: |
+            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.34.0/install.sh | bash
+            source ~/.nvm/nvm.sh
+            nvm install 10
+            nvm alias default 10
       # Download and cache dependencies
       - restore_cache:
           keys:
@@ -15,32 +22,34 @@ jobs:
             - v10-dependencies-
       - run:
           name: Install dependencies
-          command: npm install
+          command: |
+            source ~/.nvm/nvm.sh
+            npm install
       - save_cache:
           paths:
             - node_modules
           key: v10-dependencies-{{ checksum "package.json" }}
       - run:
           name: Build and compile
-          command: npm run build
-      - run:
-          name: Install Docker Compose
           command: |
-            curl -L https://github.com/docker/compose/releases/download/1.24.1/docker-compose-`uname -s`-`uname -m` > ~/docker-compose
-            chmod +x ~/docker-compose
-            sudo mv ~/docker-compose /usr/local/bin/docker-compose
-      - setup_remote_docker
+            source ~/.nvm/nvm.sh
+            npm run build
       - run:
           name: Run tests
           command: |
+            source ~/.nvm/nvm.sh
             ./start-test-env.sh
             npm test
       - run:
           name: Lint files
-          command: npm run lint
+          command: |
+            source ~/.nvm/nvm.sh
+            npm run lint
       - run:
           name: Upload code coverage
-          command: npx codecov
+          command: |
+            source ~/.nvm/nvm.sh
+            npx codecov
       - persist_to_workspace:
           root: ~/repo
           paths: .
