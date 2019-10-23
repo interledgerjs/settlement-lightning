@@ -37,7 +37,7 @@ jobs:
           name: Run tests
           command: |
             source ~/.bashrc
-            ./start-test-env.sh
+            source ./start-test-env.sh
             npm test
       - run:
           name: Lint files
