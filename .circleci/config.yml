@@ -10,6 +10,7 @@ jobs:
       - run:
           name: Install Node.js
           command: |
+            source ~/.bashrc
             nvm install 10
             nvm alias default 10
       # Download and cache dependencies
