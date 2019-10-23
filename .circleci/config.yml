@@ -11,8 +11,8 @@ jobs:
           name: Install Node.js
           command: |
             source ~/.bashrc
-            nvm install 10
-            nvm alias default 10
+            nvm install v10.16.3
+            nvm alias default v10.16.3
       # Download and cache dependencies
       - restore_cache:
           keys:
@@ -21,7 +21,9 @@ jobs:
             - v10-dependencies-
       - run:
           name: Install dependencies
-          command: npm install
+          command: |
+            source ~/.bashrc
+            npm install
       - save_cache:
           paths:
             - node_modules
