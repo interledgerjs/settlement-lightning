@@ -1,6 +1,6 @@
 # Remove running containers
-docker stop alice bob btcd
-docker rm alice bob btcd
+docker stop alice bob btcd || :
+docker rm alice bob btcd || :
 
 # Show output and fail fast on errors
 # set -x -e
