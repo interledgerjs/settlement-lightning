@@ -30,18 +30,25 @@ jobs:
           key: v10-dependencies-{{ checksum "package.json" }}
       - run:
           name: Build and compile
-          command: npm run build
+          command: |
+            source ~/.bashrc
+            npm run build
       - run:
           name: Run tests
           command: |
+            source ~/.bashrc
             ./start-test-env.sh
             npm test
       - run:
           name: Lint files
-          command: npm run lint
+          command: |
+            source ~/.bashrc
+            npm run lint
       - run:
           name: Upload code coverage
-          command: npx codecov
+          command: |
+            source ~/.bashrc
+            npx codecov
       - persist_to_workspace:
           root: ~/repo
           paths: .
