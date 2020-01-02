@@ -18,12 +18,20 @@ npm i -g ilp-settlement-lightning
 
 Requires Node.js v10+. **For development, Node v12 is currently unsupported.**
 
-```bash
-ilp-settlement-lightning
-```
+Run `ilp-settlement-lightning` with the following environment variables:
 
-### Configuration
-
+- **`LND_ADMIN_MACAROON`**
+  - **Required**
+  - LND macaroon to used authenticate daemon requests, as a base64-encoded string
+- **`LND_TLS_CERT`**
+  - **Required**
+  - TLS certificate to authenticate the connection to LND's gRPC server, as a base64-encoded string
+- **`LND_HOSTNAME`**
+  - Default: `localhost`
+  - Hostname of the Lightning node
+- **`LND_GRPC_PORT`**
+  - Default: `10009`
+  - Port of LND gRPC server
 - **`CONNECTOR_URL`**: URL of the connector's server dedicated to this settlement engine.
   - Default: `http://localhost:7771`
 - **`ENGINE_PORT`**: Port of the settlement engine server exposed to the connector (e.g. for triggering automated settlements).
@@ -32,30 +40,6 @@ ilp-settlement-lightning
   - Default: `127.0.0.1:6379/1` (database index of 1 instead of 0)
   - Note: this settlement engine **must** use a unique Redis database index (or dedicated Redis instance) for security to prevent conflicting with the connector.
 - **`DEBUG`**: Pattern for printing debug logs. To view logs, `settlement*` is recommended.
-
-### Connect to custom LND instance
-
-To connect to an existing LND node (on mainnet, testnet, or a local simnet), configure the following environment variables:
-
-#### **`LND_ADMIN_MACAROON`**
-
-- **Required**
-- LND macaroon to used authenticate daemon requests, as a base64-encoded string
-
-#### **`LND_TLS_CERT`**
-
-- **Required**
-- TLS certificate to authenticate the connection to LND's gRPC server, as a base64-encoded string
-
-#### **`LND_HOSTNAME`**
-
-- Default: `localhost`
-- Hostname of the Lightning node
-
-#### **`LND_GRPC_PORT`**
-
-- Default: `10009`
-- Port of LND gRPC server
 
 ## Roadmap
 
