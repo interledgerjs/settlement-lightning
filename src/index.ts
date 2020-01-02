@@ -1,292 +1,258 @@
 import { waitForClientReady } from '@grpc/grpc-js'
 import BigNumber from 'bignumber.js'
-import { registerProtocolNames } from 'btp-packet'
+import { randomBytes } from 'crypto'
 import debug from 'debug'
-import { EventEmitter2 } from 'eventemitter2'
-import createLogger from 'ilp-logger'
-import { BtpPacket, IlpPluginBtpConstructorOptions } from 'ilp-plugin-btp'
-import { BehaviorSubject } from 'rxjs'
+import { AccountServices, SettlementEngine } from 'ilp-settlement-core'
 import { promisify } from 'util'
-import LightningAccount from './account'
+import { lnrpc } from '../generated/rpc'
 import {
   createGrpcClient,
   createInvoiceStream,
   createLnrpc,
   createPaymentStream,
   GrpcConnectionOpts,
-  InvoiceStream,
-  LndService,
-  PaymentStream,
-  GrpcClient
+  payInvoice,
+  sha256,
+  connectPeer
 } from './lightning'
-import { LightningClientPlugin } from './plugins/client'
-import { LightningServerPlugin, MiniAccountsOpts } from './plugins/server'
-import {
-  DataHandler,
-  Logger,
-  MemoryStore,
-  MoneyHandler,
-  PluginInstance,
-  PluginServices,
-  Store
-} from './types/plugin'
+import { isPeeringRequestMessage, isPaymentPreimageMessage } from './messages'
 
-// Re-export Lightning related-services
-export * from './lightning'
-export { LightningAccount }
+const log = debug('settlement-lightning')
 
-registerProtocolNames(['peeringRequest', 'paymentRequest'])
+const SEND_PAYMENT_FINAL_CLTV_DELTA = 144 // Approximately 1 day @ 10 minutes / block
 
-// TODO Should the default handlers return ILP reject packets?
+export type LightningEngineConfig = GrpcConnectionOpts
 
-const defaultDataHandler: DataHandler = () => {
-  throw new Error('no request handler registered')
+export interface LightningEngine extends SettlementEngine {
+  setupAccount(accountId: string): Promise<void>
+  sharePeeringInfo(accountId: string): Promise<string | undefined>
+  handleMessage(accountId: string, message: any): Promise<any>
+  disconnect(): Promise<void>
 }
 
-const defaultMoneyHandler: MoneyHandler = () => {
-  throw new Error('no money handler registered')
-}
+export type ConnectLightningEngine = (
+  services: AccountServices
+) => Promise<LightningEngine>
 
-export interface LightningPluginOpts
-  extends MiniAccountsOpts,
-    IlpPluginBtpConstructorOptions {
-  /**
-   * "client" to connect to a single peer or parent server that is explicity specified
-   * "server" to enable multiple clients to openly connect to the plugin
-   */
-  role: 'client' | 'server'
+export const createEngine = (
+  config: LightningEngineConfig
+): ConnectLightningEngine => async ({ sendMessage, creditSettlement }) => {
+  const grpcClient = createGrpcClient(config)
+  const lightningClient = createLnrpc(grpcClient)
 
-  /** Config to connection to a gRPC server, or an already-constructed LND service */
-  lnd: GrpcConnectionOpts | LndService
-
-  /** Bidirectional streaming RPC to send outgoing payments and receive attestations */
-  paymentStream?: PaymentStream
-
-  /** Streaming RPC of newly added or settled invoices */
-  invoiceStream?: InvoiceStream
-
-  /** Maximum allowed amount in satoshis for incoming packets (satoshis) */
-  maxPacketAmount?: BigNumber.Value
-}
-
-export default class LightningPlugin extends EventEmitter2
-  implements PluginInstance {
-  static readonly version = 2
-  readonly _log: Logger
-  readonly _store: Store
-  readonly _maxPacketAmount: BigNumber
-  readonly _maxBalance: BigNumber
-  readonly _accounts = new Map<string, LightningAccount>() // accountName -> account
-  readonly _plugin: LightningServerPlugin | LightningClientPlugin
-  _dataHandler: DataHandler = defaultDataHandler
-  _moneyHandler: MoneyHandler = defaultMoneyHandler
-
-  /** gRPC client for raw RPC calls */
-  readonly _grpcClient?: GrpcClient
-
-  /** Wrapper around gRPC client for the Lightning RPC service, with typed methods and messages */
-  readonly _lightning: LndService
-
-  /** Bidirectional streaming RPC to send outgoing payments and receive attestations */
-  _paymentStream?: PaymentStream
-
-  /** Streaming RPC of newly added or settled invoices */
-  _invoiceStream?: InvoiceStream
+  await promisify(waitForClientReady)(grpcClient, Date.now() + 10000)
+  log('Connected to LND gRPC server')
 
   /**
-   * Unique identififer and host the Lightning node of this instance:
-   * [identityPubKey]@[hostname]:[port]
+   * Fetch public key & host for peering directly from LND
+   * Lightning address: [identityPubKey]@[hostname]:[port]
    */
-  _lightningAddress?: string
+  const { uris } = await lightningClient.getInfo({})
+  const lightningAddress = uris[0]
+  const peeringResponse = {
+    type: 'peeringRequest',
+    lightningAddress
+  }
+  log('Fetched our own Lightning address: %s', lightningAddress)
 
-  constructor(
-    {
-      role = 'client',
-      lnd,
-      paymentStream,
-      invoiceStream,
-      maxPacketAmount = Infinity,
-      ...opts
-    }: LightningPluginOpts,
-    { log, store = new MemoryStore() }: PluginServices = {}
-  ) {
-    super()
+  /*
+   * Create the streams after the connection has been established
+   * (otherwise if the credentials turn out to be invalid, throws odd error messages)
+   */
+  const paymentStream = createPaymentStream(lightningClient)
+  const invoiceStream = createInvoiceStream(lightningClient)
 
-    /*
-     * Allow consumers to both inject the LND connection
-     * externally or pass in the credentials, and the plugin
-     * will create it for them.
-     */
-    const isConnectionOpts = (o: any): o is GrpcConnectionOpts =>
-      (typeof o.tlsCert === 'string' || Buffer.isBuffer(o.tlsCert)) &&
-      (typeof o.macaroon === 'string' || Buffer.isBuffer(o.macaroon)) &&
-      typeof o.hostname === 'string'
+  // Keeping peer public keys in memory adds a minor amount of latency when either SE restarts
+  const accountToPubkey = new Map<string, string>() // Mapping of account ID -> destination public key
+  const paymentToAccount = new Map<string, string>() // Mapping of payment preimage -> account ID
 
-    if (isConnectionOpts(lnd)) {
-      this._grpcClient = createGrpcClient(lnd)
-      this._lightning = createLnrpc(this._grpcClient)
-    } else {
-      this._lightning = lnd
-    }
-
-    this._paymentStream = paymentStream
-    this._invoiceStream = invoiceStream
-
-    this._store = store
-
-    this._log = log || createLogger(`ilp-plugin-lightning-${role}`)
-    this._log.trace =
-      this._log.trace || debug(`ilp-plugin-lightning-${role}:trace`)
-
-    this._maxPacketAmount = new BigNumber(maxPacketAmount)
-      .absoluteValue()
-      .decimalPlaces(0, BigNumber.ROUND_DOWN)
-
-    this._maxBalance = new BigNumber(role === 'client' ? Infinity : 0).dp(
-      0,
-      BigNumber.ROUND_FLOOR
-    )
-
-    const loadAccount = (accountName: string) => this._loadAccount(accountName)
-    const getAccount = (accountName: string) => {
-      const account = this._accounts.get(accountName)
-      if (!account) {
-        throw new Error(`Account ${accountName} is not yet loaded`)
+  // Credit incoming payments to the correct account
+  invoiceStream.on(
+    'data',
+    ({ amtPaidSat, settled, rPreimage }: lnrpc.IInvoice) => {
+      if (!amtPaidSat || !settled || !rPreimage) {
+        return
       }
 
-      return account
+      const amountBtc = new BigNumber(amtPaidSat.toString()).shiftedBy(-8)
+      const preimageHex = Buffer.from(rPreimage).toString('hex')
+      const accountId = paymentToAccount.get(preimageHex)
+      if (!accountId) {
+        log(
+          'Received incoming Lightning payment from unknown account: preimage=%s sat=%d',
+          preimageHex,
+          amtPaidSat
+        )
+        return
+      }
+
+      // Garbage collect the preimage, since the sender shouldn't reuse it
+      paymentToAccount.delete(preimageHex)
+
+      log(
+        'Received incoming Lightning payment: account=%s btc=%s',
+        accountId,
+        amountBtc
+      )
+      creditSettlement(accountId, amountBtc)
     }
+  )
 
-    this._plugin =
-      role === 'server'
-        ? new LightningServerPlugin(
-            { getAccount, loadAccount, ...opts },
-            { store, log }
-          )
-        : new LightningClientPlugin(
-            { getAccount, loadAccount, ...opts },
-            { store, log }
-          )
+  const self: LightningEngine = {
+    async setupAccount(accountId) {
+      await this.sharePeeringInfo(accountId)
+    },
 
-    this._plugin.on('connect', () => this.emitAsync('connect'))
-    this._plugin.on('disconnect', () => this.emitAsync('disconnect'))
-    this._plugin.on('error', e => this.emitAsync('error', e))
-  }
-
-  async _loadAccount(accountName: string): Promise<LightningAccount> {
-    /** Create a stream from the value in the store */
-    const loadValue = async (key: string) => {
-      const storeKey = `${accountName}:${key}`
-      const subject = new BehaviorSubject(
-        new BigNumber((await this._store.get(storeKey)) || 0)
+    /**
+     * Send our Lightning address to the peer, request their address, then peer over Lightning
+     *
+     * @param accountId Account ID of peer to exchange peering info
+     * @returns Identity public key from the peer
+     */
+    async sharePeeringInfo(accountId): Promise<string | undefined> {
+      const response = await sendMessage(accountId, peeringResponse).catch(
+        err => log(`Error while exchanging peering info: ${err.message}`)
       )
 
-      // Automatically persist it to the store
-      subject.subscribe(value => this._store.put(storeKey, value.toString()))
+      if (isPeeringRequestMessage(response)) {
+        const { lightningAddress: peerAddress } = response
 
-      return subject
+        const [identityPubKey] = response.lightningAddress.split('@')
+        accountToPubkey.set(accountId, identityPubKey)
+
+        try {
+          await connectPeer(lightningClient, peerAddress)
+          log(
+            'Successfully peered over Lightning: account=%s address=%s',
+            accountId,
+            peerAddress
+          )
+        } catch (err) {
+          log(
+            'Unable to peer over Lightning: account=%s address=%s',
+            accountId,
+            peerAddress,
+            err
+          )
+        }
+
+        return identityPubKey
+      }
+    },
+
+    async settle(accountId, amount) {
+      const amountBtc = amount.decimalPlaces(8) // Limit precision to satoshis
+      const amountSats = amountBtc.shiftedBy(8).toNumber()
+
+      const destinationPubkey =
+        accountToPubkey.get(accountId) ||
+        (await this.sharePeeringInfo(accountId)) // If no pubkey is linked, request it
+      if (!destinationPubkey) {
+        log(
+          `Failed to settle: error fetching peer Lightning address. account=%s btc=%s`,
+          accountId,
+          amountBtc
+        )
+        return new BigNumber(0)
+      }
+
+      try {
+        const preimage = await promisify(randomBytes)(32)
+        const paymentHash = sha256(preimage)
+
+        /**
+         * Sending payments:
+         * 1) Quickly send a preimage to the recipient, which they will use to add an invoice on their node
+         * 2) Immeditaely try to send a Lightning payment to them using that invoice
+         *
+         * Thus, there's a race condition: if the pending HTLC reaches their node before the invoice is added,
+         * the payment will fail. However, since Lightning is *very* slow, this doesn't occur in a local environment
+         * with no latency. To experience this failure, the latency between two peers' connectors would need to be
+         * much higher than the latency between all Lightning nodes in the shortest payment path (unlikely).
+         *
+         * Rationale for this design:
+         * - Lightning does not yet support spontaneous payments, but they're coming soon with AMP. That will
+         *   simplify this so we don't need to share any invoices.
+         * - The previous approach was the recipient would "preshare" ~10 invoices, but this introduced
+         *   other problems, since invoices expire and would constantly need to be regenerated. In order to make this
+         *   work with SEs, the sender would also need to persist the available invoices for each account.
+         */
+
+        sendMessage(accountId, {
+          type: 'paymentPreimage',
+          preimage: preimage.toString('hex')
+        }).catch(err =>
+          log(
+            'Error sending payment preimage to peer: account=%s btc=%s preimage=%s',
+            accountId,
+            amountBtc,
+            preimage,
+            err
+          )
+        )
+
+        log(
+          'Sending Lightning payment: account=%s btc=%s pubkey=%s preimage=%s',
+          accountId,
+          amountBtc,
+          destinationPubkey,
+          preimage.toString('hex')
+        )
+        await payInvoice(paymentStream, {
+          destString: destinationPubkey,
+          amt: amountSats,
+          paymentHash,
+          finalCltvDelta: SEND_PAYMENT_FINAL_CLTV_DELTA
+        })
+
+        return amountBtc
+      } catch (err) {
+        log(
+          'Failed to send payment: account=%s btc=%s',
+          accountId,
+          amountBtc,
+          err
+        )
+        return new BigNumber(0)
+      }
+    },
+
+    async handleMessage(accountId, message) {
+      if (isPeeringRequestMessage(message)) {
+        const [identityPublicKey] = message.lightningAddress.split('@')
+        accountToPubkey.set(accountId, identityPublicKey)
+        log(
+          'Linked public key to account: account=%s pubkey=%s',
+          accountId,
+          identityPublicKey
+        )
+
+        return peeringResponse
+      } else if (isPaymentPreimageMessage(message)) {
+        // TODO Rate limit this so we're not DoS-ed with new invoices?
+
+        const { preimage } = message
+        paymentToAccount.set(preimage, accountId)
+
+        log(
+          'Preparing to receive payment: account=%s preimage=%s',
+          accountId,
+          preimage
+        )
+        await lightningClient.addInvoice({
+          rPreimage: Buffer.from(preimage, 'hex')
+        })
+      } else {
+        throw new Error('Received unsupported message type')
+      }
+    },
+
+    async disconnect() {
+      if (grpcClient) {
+        grpcClient.close()
+      }
     }
-
-    const payableBalance$ = await loadValue('payableBalance')
-    const receivableBalance$ = await loadValue('receivableBalance')
-    const payoutAmount$ = await loadValue('payoutAmount')
-
-    // Account data must always be loaded from store before it's in the map
-    if (!this._accounts.has(accountName)) {
-      const account = new LightningAccount({
-        sendMessage: (message: BtpPacket) =>
-          this._plugin._sendMessage(accountName, message),
-        dataHandler: (data: Buffer) => this._dataHandler(data),
-        moneyHandler: (amount: string) => this._moneyHandler(amount),
-        accountName,
-        payableBalance$,
-        receivableBalance$,
-        payoutAmount$,
-        master: this
-      })
-
-      // Since this account didn't previosuly exist, save it in the store
-      this._accounts.set(accountName, account)
-    }
-
-    return this._accounts.get(accountName)!
   }
 
-  async connect() {
-    if (this._grpcClient) {
-      await promisify(waitForClientReady)(this._grpcClient, Date.now() + 10000)
-    }
-
-    // Fetch public key & host for peering directly from LND
-    const response = await this._lightning.getInfo({})
-    this._lightningAddress = response.identityPubkey
-
-    /*
-     * Create only a single HTTP/2 stream per-plugin for
-     * invoices and payments (not per-account)
-     *
-     * Create the streams after the connection has been established
-     * (otherwise if the credentials turn out to be invalid,
-     * this can throw some odd error messages)
-     */
-    if (!this._paymentStream) {
-      this._paymentStream = createPaymentStream(this._lightning)
-    }
-    if (!this._invoiceStream) {
-      this._invoiceStream = createInvoiceStream(this._lightning)
-    }
-
-    return this._plugin.connect()
-  }
-
-  async disconnect() {
-    await this._plugin.disconnect()
-
-    this._accounts.forEach(account => account.unload())
-    this._accounts.clear()
-
-    if (this._grpcClient) {
-      this._grpcClient.close()
-    }
-  }
-
-  isConnected() {
-    return this._plugin.isConnected()
-  }
-
-  sendData(data: Buffer) {
-    return this._plugin.sendData(data)
-  }
-
-  sendMoney(amount: string) {
-    return this._plugin.sendMoney(amount)
-  }
-
-  registerDataHandler(dataHandler: DataHandler) {
-    if (this._dataHandler !== defaultDataHandler) {
-      throw new Error('request handler already registered')
-    }
-
-    this._dataHandler = dataHandler
-    return this._plugin.registerDataHandler(dataHandler)
-  }
-
-  deregisterDataHandler() {
-    this._dataHandler = defaultDataHandler
-    return this._plugin.deregisterDataHandler()
-  }
-
-  registerMoneyHandler(moneyHandler: MoneyHandler) {
-    if (this._moneyHandler !== defaultMoneyHandler) {
-      throw new Error('money handler already registered')
-    }
-
-    this._moneyHandler = moneyHandler
-    return this._plugin.registerMoneyHandler(moneyHandler)
-  }
-
-  deregisterMoneyHandler() {
-    this._moneyHandler = defaultMoneyHandler
-    return this._plugin.deregisterMoneyHandler()
-  }
+  return self
 }
