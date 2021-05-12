@@ -45,7 +45,7 @@
   ],
   "license": "Apache-2.0",
   "dependencies": {
-    "@grpc/grpc-js": "^0.3.6",
+    "@grpc/grpc-js": "^1.1.8",
     "bignumber.js": "^7.2.1",
     "btp-packet": "^2.2.0",
     "debug": "^4.1.1",
